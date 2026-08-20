@@ -149,6 +149,43 @@ def _suggest_categories(type_: str, bbox, release, target: str, n: int = 3):
     return [v for _, v in scored[:n]]
 
 
+def _warn_zero_category(type_: str, bbox, release, filters) -> None:
+    """Emit the near-match hint when a categories.primary filter matched nothing.
+
+    Shared by `places` and `count` so the two cannot drift. Only called on the
+    zero-result path: _suggest_categories issues a second scan of the bbox.
+    """
+    cat_filters = [
+        f for f in (filters or [])
+        if f.key == "categories.primary" and f.op in ("=", "in")
+    ]
+    if not cat_filters:
+        return
+    target = cat_filters[0].value
+    if isinstance(target, list):
+        target = target[0] if target else None
+    if not target:
+        return
+    hits = _suggest_categories(type_, bbox, release, str(target))
+    if hits:
+        click.secho(
+            f"[botmap] 0 rows. No {type_} has "
+            f"categories.primary={target!r} in this bbox. "
+            f"Did you mean: {', '.join(hits)}? "
+            f"Run `botmap categories -t {type_} --bbox …` "
+            f"to see the full list.",
+            fg="yellow", err=True,
+        )
+    else:
+        click.secho(
+            f"[botmap] 0 rows. categories.primary={target!r} "
+            f"is not present in this bbox. Run "
+            f"`botmap categories -t {type_} --bbox …` "
+            f"to see what's available.",
+            fg="yellow", err=True,
+        )
+
+
 def _no_match_help(query: str) -> str:
     """Build an actionable message when a place query resolves to nothing.
 
@@ -801,6 +838,12 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
         type_, bbox=bbox, release=release, stac=True, where_filters=where_filters,
     )
 
+    # The Skill tells agents to "count before pulling", so `count` is where a
+    # wrong category value is first seen. Without this it returns a bare 0 and
+    # the agent reads that as "there are none here".
+    if n == 0:
+        _warn_zero_category(type_, bbox, release, where_filters)
+
     if ctx.obj.get("json"):
         _emit_json(ctx, {
             "type": type_,
@@ -1137,35 +1180,7 @@ def places(in_place, bbox, category, where_exprs, limit, output_format, output, 
         rows_written = copy(reader, writer)
 
     if rows_written == 0:
-        # Zero-result hint: was a categories.primary filter the cause?
-        # If so, suggest near-match values from the bbox's actual category list.
-        cat_filters = [
-            f for f in filters
-            if f.key == "categories.primary" and f.op in ("=", "in")
-        ]
-        if cat_filters:
-            target = cat_filters[0].value
-            if isinstance(target, list):
-                target = target[0] if target else None
-            if target:
-                hits = _suggest_categories("place", bbox, release, str(target))
-                if hits:
-                    click.secho(
-                        f"[botmap] 0 rows. No place has "
-                        f"categories.primary={target!r} in this bbox. "
-                        f"Did you mean: {', '.join(hits)}? "
-                        f"Run `botmap categories -t place --bbox …` "
-                        f"to see the full list.",
-                        fg="yellow", err=True,
-                    )
-                else:
-                    click.secho(
-                        f"[botmap] 0 rows. categories.primary={target!r} "
-                        f"is not present in this bbox. Run "
-                        f"`botmap categories -t place --bbox …` "
-                        f"to see what's available.",
-                        fg="yellow", err=True,
-                    )
+        _warn_zero_category("place", bbox, release, filters)
 
 
 @cli.command()
