@@ -38,6 +38,22 @@ git diff --quiet arm-a-base <branch> && echo "EMPTY CANDIDATE -- do not measure"
 
 Never measure an empty candidate.
 
+**And re-sync after ANY commit to the base.** When the base moves, candidate
+branches fall behind it, and `git diff arm-a-base <branch>` then presents the
+base's new commits as *reverts* inside the candidate's diff. This has already
+happened once: a 116-line revert of this very file appeared inside all three
+candidates, which a reward-hack reviewer would have read as the candidate
+tampering with its own verifier -- and rejected, correctly.
+
+Run the guard after every base commit and before every measurement:
+
+```bash
+./notes/sync-candidates.sh
+```
+
+It rebases each candidate onto the base and refuses any that is empty, touches
+files outside `botmap/`, or touches `evals/`.
+
 ## 2. Check the mechanism first -- it is free
 
 Before spending any quota, prove the change does what it claims, directly
