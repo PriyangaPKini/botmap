@@ -183,7 +183,7 @@ botmap landuse --in "Brooklyn, NY" --class residential \
 ### 15. Bus stops and other transit POIs
 ```bash
 # Transit stops are PLACES (categories.primary), not infrastructure.
-botmap places --in "Williamsburg, NY" --category bus_stop \
+botmap places --in "Williamsburg, NY" --category bus_station \
   -f geojsonseq -o busstops.jsonl
 ```
 
@@ -207,7 +207,7 @@ botmap addresses --bbox -71.07,42.35,-71.06,42.36 --postcode 02108
 
 | Type | Theme | Key properties |
 |---|---|---|
-| `place` | places | `categories.primary` (hotel, restaurant, cafe, hospital, **bus_stop, bus_station, train_station**, ...), `names.primary`, `confidence`, `addresses` |
+| `place` | places | `categories.primary` (hotel, restaurant, cafe, hospital, **bus_station, train_station**, ...), `names.primary`, `confidence`, `addresses` |
 | `building` | buildings | `height` (meters), `num_floors`, `class`, `subtype`, `roof_shape` |
 | `segment` | transportation | `class` — covers ALL segments, not just car roads: motorway, primary, secondary, residential, **footway, path, cycleway**, sidewalk; plus `subclass`, `surface`, `speed_limits`. Use the `roads` verb with `--class`. |
 | `division` | divisions | `subtype` (country, region, county, locality, neighborhood, ...), `admin_level`, `population`. Use `where … --geometry` for the boundary polygon. |
@@ -255,7 +255,7 @@ file named `150` and passes only `height` to the CLI (which then errors with
   shell does not treat them as redirection (which writes a file named after the
   number and truncates the filter to just the key): `--where 'height>150'`.
 - **Bus stops and transit points are `place` features.** Use
-  `places --category bus_stop` (also bus_station, train_station) — not
+  `places --category bus_station` (also train_station) — not
   `download -t infrastructure`.
 - **`roads` covers bikes and footpaths too.** It returns every transportation
   segment. Use `roads --class cycleway` (or footway/path) instead of
