@@ -779,10 +779,14 @@ def boundary(ctx, query):
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
 @click.option("--where", "where_exprs", multiple=True)
+@click.option("--category", required=False, type=str,
+              help="Shortcut for --where categories.primary=VAL")
+@click.option("--class", "feature_class", required=False, type=str,
+              help="Shortcut for --where class=VAL")
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
-def count(ctx, type_, bbox, in_place, where_exprs, release):
+def count(ctx, type_, bbox, in_place, where_exprs, category, feature_class, release):
     """Count features for a query without downloading them."""
     if bbox is not None and in_place is not None:
         raise click.UsageError("--bbox and --in are mutually exclusive")
@@ -796,6 +800,21 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
         )
     except ValueError as e:
         raise click.UsageError(str(e))
+
+    # `places` accepts --category and `roads` accepts --class, so an agent that
+    # used them there reasonably expects them here -- and the Skill's workflow
+    # sends it to `count` first. Same sugar, same spelling.
+    for flag, value, key in (("--category", category, "categories.primary"),
+                             ("--class", feature_class, "class")):
+        if value is None:
+            continue
+        if any(f.key == key for f in (where_filters or [])):
+            raise click.UsageError(
+                f"{flag} and --where {key}=... are the same filter; use one or the other"
+            )
+        where_filters = (where_filters or []) + [
+            ParsedFilter(key=key, op="=", value=value)
+        ]
 
     n = _safe_count(
         type_, bbox=bbox, release=release, stac=True, where_filters=where_filters,
