@@ -166,6 +166,11 @@ def _warn_zero_category(type_: str, bbox, release, filters) -> None:
         target = target[0] if target else None
     if not target:
         return
+    # `categories` enumerates place categories only, so the recovery command
+    # below is a dead end for any other type. Say nothing rather than send the
+    # agent somewhere that cannot work.
+    if type_ != "place":
+        return
     hits = _suggest_categories(type_, bbox, release, str(target))
     if hits:
         click.secho(
