@@ -1014,8 +1014,17 @@ def categories(ctx, type_, bbox, in_place, top, release):
                 continue
             counts[val] = counts.get(val, 0) + item["counts"]
 
-    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top]
+    all_ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    ranked = all_ranked[:top]
     payload = [{"value": v, "count": c} for v, c in ranked]
+
+    if len(all_ranked) > top:
+        click.echo(
+            f"[botmap] Showing top {top} of {len(all_ranked)} categories. "
+            f"This list is truncated; rerun with `--top {len(all_ranked)}` "
+            f"or a larger --top before concluding a category is absent.",
+            err=True,
+        )
 
     if ctx.obj.get("json"):
         _emit_json(ctx, payload)
