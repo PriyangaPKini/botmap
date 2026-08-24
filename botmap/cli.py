@@ -8,6 +8,7 @@ in a specified bounding box in a few different file formats.
 
 import importlib.metadata
 import os
+import shlex
 import sys
 import uuid
 from datetime import datetime, timezone
@@ -53,6 +54,59 @@ def _safe_count(type_, **kw):
         return count_rows(type_, **kw)
     except ValueError as e:
         raise click.UsageError(str(e))
+
+
+def _count_or_none(type_, **kw):
+    """Return a count for diagnostic probes, or None when the filter cannot apply."""
+    try:
+        return count_rows(type_, **kw)
+    except (OSError, ValueError):
+        return None
+
+
+def _shell_command(parts):
+    """Format a copy/paste-safe shell command."""
+    return " ".join(shlex.quote(str(part)) for part in parts)
+
+
+def _format_count_retry(type_, bbox, in_place, where_exprs, json_mode):
+    """Build the exact count command that retries the same filters under another type."""
+    parts = ["botmap"]
+    if json_mode:
+        parts.append("--json")
+    parts.extend(["count", "-t", type_])
+    if in_place is not None:
+        parts.extend(["--in", in_place])
+    elif bbox is not None:
+        parts.extend(["--bbox", ",".join(str(value) for value in bbox)])
+    for expr in where_exprs or []:
+        parts.extend(["--where", expr])
+    return _shell_command(parts)
+
+
+def _same_filter_other_type_hint(type_, bbox, in_place, release, where_filters, where_exprs, json_mode):
+    """Name another feature type when a zero count is explained by type mismatch."""
+    if not where_filters:
+        return None
+
+    for candidate_type in sorted(t for t in get_all_overture_types() if t != type_):
+        n = _count_or_none(
+            candidate_type,
+            bbox=bbox,
+            release=release,
+            stac=True,
+            where_filters=where_filters,
+        )
+        if not n:
+            continue
+        filters = ", ".join(where_exprs)
+        command = _format_count_retry(candidate_type, bbox, in_place, where_exprs, json_mode)
+        return (
+            f"[botmap] 0 rows for -t {type_} with {filters}, but "
+            f"-t {candidate_type} returns {n:,}. Try `{command}` before "
+            f"concluding none exist."
+        )
+    return None
 
 
 def _parse_latlon(latlon: str) -> tuple[float, float]:
@@ -800,6 +854,12 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
     n = _safe_count(
         type_, bbox=bbox, release=release, stac=True, where_filters=where_filters,
     )
+    if n == 0:
+        hint = _same_filter_other_type_hint(
+            type_, bbox, in_place, release, where_filters, where_exprs, ctx.obj.get("json")
+        )
+        if hint:
+            click.secho(hint, fg="yellow", err=True)
 
     if ctx.obj.get("json"):
         _emit_json(ctx, {
