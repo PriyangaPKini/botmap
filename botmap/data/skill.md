@@ -145,7 +145,14 @@ botmap --json containing 40.7484,-73.9857
 ### 9. Discover what categories exist in a place
 ```bash
 botmap --json categories -t place --in "Brooklyn" --top 20
+botmap --json categories -t place --in "Brooklyn" --search bike
 ```
+
+Use `--search TERM` when looking for a specific kind of place. It searches the
+category values present in the selected area after counting them, so it avoids
+missing a valid low-frequency category just because it was not in the top-N list.
+If a top-N category list says it is truncated, prefer `--search` for targeted
+vocabulary discovery before concluding the category is absent.
 
 ### 10. Discover what's queryable on a type
 ```bash
