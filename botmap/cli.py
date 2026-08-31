@@ -963,10 +963,13 @@ def schema(ctx, type_, release):
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
 @click.option("--top", default=20, show_default=True, type=int)
+@click.option("--search", default=None, type=str,
+              help="After counting categories in the selected area, show only "
+                   "category values containing this text. Still scans the area.")
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
-def categories(ctx, type_, bbox, in_place, top, release):
+def categories(ctx, type_, bbox, in_place, top, search, release):
     """Enumerate `categories.primary` values, sorted by count desc."""
     if type_ != "place":
         verb = TYPE_TO_VERB.get(type_)
@@ -1014,8 +1017,35 @@ def categories(ctx, type_, bbox, in_place, top, release):
                 continue
             counts[val] = counts.get(val, 0) + item["counts"]
 
-    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top]
-    payload = [{"value": v, "count": c} for v, c in ranked]
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    if search is not None:
+        needle = search.casefold()
+        ranked = [(value, count) for value, count in ranked
+                  if needle in value.casefold()]
+
+    payload = [{"value": v, "count": c} for v, c in ranked[:top]]
+
+    if len(ranked) > top:
+        if search is None:
+            click.echo(
+                f"[botmap] Showing top {top} of {len(ranked)} categories. "
+                f"This list is truncated; use `--search TERM` if looking for "
+                f"a specific category, or rerun with `--top {len(ranked)}`.",
+                err=True,
+            )
+        else:
+            click.echo(
+                f"[botmap] Showing top {top} of {len(ranked)} categories "
+                f"matching {search!r}. This list is truncated; rerun with "
+                f"`--top {len(ranked)}` or a larger --top.",
+                err=True,
+            )
+
+    if search is not None and not payload:
+        click.echo(
+            f"[botmap] No categories matching {search!r} in this area.",
+            err=True,
+        )
 
     if ctx.obj.get("json"):
         _emit_json(ctx, payload)
