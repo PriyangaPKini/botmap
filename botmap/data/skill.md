@@ -145,7 +145,41 @@ botmap --json containing 40.7484,-73.9857
 ### 9. Discover what categories exist in a place
 ```bash
 botmap --json categories -t place --in "Brooklyn" --top 20
+botmap --json categories -t place --in "Brooklyn" --search bike
 ```
+
+Use `--search TERM` when looking for a specific kind of place. It searches the
+category values present in the selected area after counting them, so it avoids
+missing a valid low-frequency category just because it was not in the top-N list.
+If a top-N category list says it is truncated, prefer `--search` for targeted
+vocabulary discovery before concluding the category is absent.
+
+**Search semantically similar and regional wording before concluding absence.**
+`--search` is a plain case-insensitive substring match over the category values
+that actually exist in the area, so it only finds the vocabulary Overture uses —
+which is often not the words the question uses. When your first term returns
+nothing, restate the concept as the short generic English nouns a category value
+would likely contain, and try them one at a time (one `--search` per term) before
+reporting that no such category exists. Keep each term to a single short stem:
+category values are underscore-joined, so a needle containing a space can never
+match, and a stem matches every value it appears in (`--search parking` finds
+`bicycle_parking` and `parking_lot` alike). Note that related English words are
+not substrings of each other — `bike` will not match a `bicycle_*` value — so
+try both forms rather than assuming one covers the other.
+
+| Question wording | Terms worth trying |
+|---|---|
+| medical store, chemist, drugstore | `pharmacy`, `drug` |
+| petrol pump, fuel pump, filling station | `gas`, `station`, `fuel` |
+| bike parking, cycle parking, cycle stand | `bike`, `bicycle`, `parking` |
+| bus stop, bus stand | `bus`, `station`, `transit`, `stop` |
+| EV charger, charging point | `ev`, `charging`, `charger` |
+
+These rows are illustrations of the move, not a lookup table — apply the same
+reasoning to any wording. Regional and colloquial names (chemist, petrol pump,
+bus stand) and non-US spellings rarely appear verbatim in the data, so translate
+them to the plain generic noun first. Only report a category as absent after a
+few genuinely different candidate terms all come back empty.
 
 ### 10. Discover what's queryable on a type
 ```bash
