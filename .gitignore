@@ -150,3 +150,7 @@ results/
 evals/runs/
 evals/report.md
 evals/proposals.json
+
+# Local agent workflow files
+.agents/
+skills-lock.json
