@@ -13,14 +13,14 @@ def test_categories_returns_top_values(monkeypatch):
     """Stub a reader that yields a batch with category values; verify top-N counting."""
 
     schema = pa.schema([
-        ("categories", pa.struct([("primary", pa.string())])),
+        ("taxonomy", pa.struct([("primary", pa.string())])),
     ])
 
     rows = (
-        [{"categories": {"primary": "restaurant"}}] * 10 +
-        [{"categories": {"primary": "cafe"}}] * 7 +
-        [{"categories": {"primary": "bar"}}] * 3 +
-        [{"categories": {"primary": "hotel"}}] * 1
+        [{"taxonomy": {"primary": "restaurant"}}] * 10 +
+        [{"taxonomy": {"primary": "cafe"}}] * 7 +
+        [{"taxonomy": {"primary": "bar"}}] * 3 +
+        [{"taxonomy": {"primary": "hotel"}}] * 1
     )
 
     class _Reader:

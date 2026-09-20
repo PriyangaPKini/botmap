@@ -967,18 +967,18 @@ def schema(ctx, type_, release):
               required=False)
 @click.pass_context
 def categories(ctx, type_, bbox, in_place, top, release):
-    """Enumerate `categories.primary` values, sorted by count desc."""
+    """Enumerate `taxonomy.primary` values, sorted by count desc."""
     if type_ != "place":
         verb = TYPE_TO_VERB.get(type_)
         if verb:
             raise click.UsageError(
-                f"`categories` enumerates `categories.primary` for place features. "
+                f"`categories` enumerates `taxonomy.primary` for place features. "
                 f"For `{type_}`, the classifying field is `class` — run "
                 f"`botmap --json schema -t {type_}` to see available values, "
                 f"or filter directly with `botmap {verb} --class <value>`."
             )
         raise click.UsageError(
-            f"`categories` only enumerates `categories.primary` for place features. "
+            f"`categories` only enumerates `taxonomy.primary` for place features. "
             f"Run `botmap --json schema -t {type_}` to inspect available fields."
         )
     if bbox is not None and in_place is not None:
@@ -1006,7 +1006,7 @@ def categories(ctx, type_, bbox, in_place, top, release):
             break
         if batch.num_rows == 0:
             continue
-        cat_col = batch.column("categories")
+        cat_col = batch.column("taxonomy")
         primary = pc.struct_field(cat_col, "primary")
         for item in pc.value_counts(primary).to_pylist():
             val = item["values"]
