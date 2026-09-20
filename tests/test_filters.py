@@ -148,6 +148,25 @@ class TestValidateAgainstSchema:
         assert "available fields" in str(exc.value).lower()
         assert "height" in str(exc.value)
 
+    def test_categories_primary_still_works_when_present(self):
+        schema = pa.schema([
+            ("categories", pa.struct([("primary", pa.string())])),
+            ("taxonomy", pa.struct([("primary", pa.string())])),
+        ])
+        f = ParsedFilter("categories.primary", "=", "restaurant")
+        f.validate_against_schema(schema)
+
+    def test_removed_categories_primary_names_successor(self):
+        schema = pa.schema([
+            ("taxonomy", pa.struct([("primary", pa.string())])),
+        ])
+        f = ParsedFilter("categories.primary", "=", "restaurant")
+        with pytest.raises(ValueError) as exc:
+            f.validate_against_schema(schema)
+        msg = str(exc.value)
+        assert "categories.primary" in msg
+        assert "taxonomy.primary" in msg
+
     def test_unknown_nested_raises(self):
         schema = pa.schema([
             ("categories", pa.struct([("primary", pa.string())])),
