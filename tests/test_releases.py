@@ -2,7 +2,12 @@
 
 import pytest
 from botmap import releases
-from botmap.core import get_latest_release
+from botmap.core import (
+    _RELEASE_RE,
+    _release_from_href,
+    get_available_releases,
+    get_latest_release,
+)
 
 
 def test_list_releases():
@@ -47,3 +52,37 @@ def test_get_next_release():
 
     # Invalid release should return None
     assert releases.get_next_release("invalid-release") is None
+
+
+def test_release_from_href_absolute():
+    """Catalog child links are absolute URLs as of 2026."""
+    assert _release_from_href(
+        "https://stac.overturemaps.org/2026-08-19.0/catalog.json"
+    ) == "2026-08-19.0"
+
+
+def test_release_from_href_relative():
+    """Older catalogs served relative hrefs; both must parse."""
+    assert _release_from_href("./2026-08-19.0/catalog.json") == "2026-08-19.0"
+
+
+def test_release_from_href_no_filename():
+    """An href without a trailing document still yields the release."""
+    assert _release_from_href(
+        "https://stac.overturemaps.org/2026-08-19.0/"
+    ) == "2026-08-19.0"
+
+
+def test_release_from_href_without_release_id():
+    """A link carrying no release ID yields None rather than a path fragment."""
+    assert _release_from_href("https://stac.overturemaps.org/catalog.json") is None
+    assert _release_from_href("") is None
+
+
+def test_available_releases_are_release_ids():
+    """Guard the parse bug: every entry must look like a release, not a URL part."""
+    all_releases, latest = get_available_releases()
+    assert all_releases, "catalog returned no releases"
+    for r in all_releases:
+        assert _RELEASE_RE.fullmatch(r), f"{r!r} is not a release ID"
+    assert latest in all_releases

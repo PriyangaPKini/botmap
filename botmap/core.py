@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import sys
 from typing import List, Optional, Tuple
 from urllib.request import urlopen
@@ -13,6 +14,9 @@ import pyarrow.parquet as pq
 from .models import BBox
 
 STAC_CATALOG_URL = "https://stac.overturemaps.org/catalog.json"
+
+# Release IDs look like "2026-08-19.0".
+_RELEASE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\.\d+")
 
 # Cache for STAC catalog to avoid repeated network calls
 _cached_stac_catalog = None
@@ -54,6 +58,17 @@ def _get_stac_catalog() -> dict:
         raise Exception(f"Could not fetch STAC catalog: {e}") from e
 
 
+def _release_from_href(href: str) -> Optional[str]:
+    """Pull a release ID like "2026-08-19.0" out of a STAC child link.
+
+    The catalog has served both relative ("./2026-08-19.0/catalog.json") and
+    absolute ("https://stac.overturemaps.org/2026-08-19.0/catalog.json") hrefs,
+    so match the ID itself rather than a position in the path.
+    """
+    match = _RELEASE_RE.search(href)
+    return match.group(0) if match else None
+
+
 def get_available_releases() -> Tuple[List[str], str]:
     """
     Fetch available releases from the STAC catalog.
@@ -72,9 +87,7 @@ def get_available_releases() -> Tuple[List[str], str]:
     releases = []
     for link in catalog.get("links", []):
         if link.get("rel") == "child":
-            href = link.get("href", "")
-            # href format is "./2025-09-24.0/catalog.json"
-            release_version = href.strip("./").split("/")[0]
+            release_version = _release_from_href(link.get("href", ""))
             if release_version:
                 releases.append(release_version)
 
