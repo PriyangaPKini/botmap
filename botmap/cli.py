@@ -95,7 +95,7 @@ def _describe_division(d) -> str:
 
 
 def _suggest_categories(type_: str, bbox, release, target: str, n: int = 3):
-    """Scan `bbox` for `categories.primary` values and return up to `n`
+    """Scan `bbox` for `taxonomy.primary` values and return up to `n`
     closest matches to `target`. Used to power 0-result hints — only call
     on the failure path, since this issues a second scan of the bbox.
 
@@ -113,7 +113,7 @@ def _suggest_categories(type_: str, bbox, release, target: str, n: int = 3):
             break
         if batch.num_rows == 0:
             continue
-        cat_col = batch.column("categories")
+        cat_col = batch.column("taxonomy")
         primary = pc.struct_field(cat_col, "primary").to_pylist()
         for v in primary:
             if v is not None:
@@ -1087,7 +1087,7 @@ def cache_build_cmd():
 @click.option("--bbox", required=False, type=BboxParamType(),
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
 @click.option("--category", required=False, type=str,
-              help="Shortcut for --where categories.primary=VAL")
+              help="Shortcut for --where taxonomy.primary=VAL")
 @click.option("--where", "where_exprs", multiple=True)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
@@ -1116,7 +1116,7 @@ def places(in_place, bbox, category, where_exprs, limit, output_format, output, 
         raise click.UsageError(str(e))
     if category is not None:
         filters.append(ParsedFilter(
-            key="categories.primary", op="=", value=category,
+            key="taxonomy.primary", op="=", value=category,
         ))
 
     if output_format == "geoparquet" and output is None:
@@ -1137,11 +1137,11 @@ def places(in_place, bbox, category, where_exprs, limit, output_format, output, 
         rows_written = copy(reader, writer)
 
     if rows_written == 0:
-        # Zero-result hint: was a categories.primary filter the cause?
+        # Zero-result hint: was a taxonomy.primary filter the cause?
         # If so, suggest near-match values from the bbox's actual category list.
         cat_filters = [
             f for f in filters
-            if f.key == "categories.primary" and f.op in ("=", "in")
+            if f.key == "taxonomy.primary" and f.op in ("=", "in")
         ]
         if cat_filters:
             target = cat_filters[0].value
@@ -1152,7 +1152,7 @@ def places(in_place, bbox, category, where_exprs, limit, output_format, output, 
                 if hits:
                     click.secho(
                         f"[botmap] 0 rows. No place has "
-                        f"categories.primary={target!r} in this bbox. "
+                        f"taxonomy.primary={target!r} in this bbox. "
                         f"Did you mean: {', '.join(hits)}? "
                         f"Run `botmap categories -t place --bbox …` "
                         f"to see the full list.",
@@ -1160,7 +1160,7 @@ def places(in_place, bbox, category, where_exprs, limit, output_format, output, 
                     )
                 else:
                     click.secho(
-                        f"[botmap] 0 rows. categories.primary={target!r} "
+                        f"[botmap] 0 rows. taxonomy.primary={target!r} "
                         f"is not present in this bbox. Run "
                         f"`botmap categories -t place --bbox …` "
                         f"to see what's available.",
