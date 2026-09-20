@@ -17,7 +17,8 @@ def test_capabilities_json_structure():
     cmd_names = {c["name"] for c in data["commands"]}
     # Spot check: a few expected commands are present
     for expected in ("download", "where", "count", "themes", "types",
-                     "schema", "categories", "capabilities"):
+                     "schema", "categories", "basic-categories",
+                     "capabilities"):
         assert expected in cmd_names, f"missing command {expected}"
 
 
@@ -31,3 +32,12 @@ def test_capabilities_command_has_params():
     assert "bbox" in param_names
     assert "in_place" in param_names or "in" in param_names
     assert "where_exprs" in param_names or "where" in param_names
+
+
+def test_capabilities_places_has_basic_category_param():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["--json", "capabilities"])
+    data = json.loads(result.output)
+    places = next(c for c in data["commands"] if c["name"] == "places")
+    param_names = {p["name"] for p in places["params"]}
+    assert "basic_category" in param_names or "basic-category" in param_names
