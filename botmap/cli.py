@@ -955,6 +955,67 @@ def schema(ctx, type_, release):
         )
 
 
+def _resolve_enumeration_bbox(bbox, in_place):
+    """Resolve shared enumeration location flags to one bbox."""
+    if bbox is not None and in_place is not None:
+        raise click.UsageError("--bbox and --in are mutually exclusive")
+    if in_place is not None:
+        division = _resolve_in_place(in_place)
+        return list(division.bbox)
+    if bbox is None:
+        raise click.UsageError(
+            "Provide --bbox or --in; global enumeration is too costly."
+        )
+    return bbox
+
+
+def _count_reader_values(
+    reader, column_name: str, struct_field: str | None = None,
+) -> dict[str, int]:
+    """Count non-null values from one reader column."""
+    counts: dict[str, int] = {}
+    while True:
+        try:
+            batch = reader.read_next_batch()
+        except StopIteration:
+            break
+        if batch.num_rows == 0:
+            continue
+        values = batch.column(column_name)
+        if struct_field is not None:
+            values = pc.struct_field(values, struct_field)
+        for item in pc.value_counts(values).to_pylist():
+            value = item["values"]
+            if value is not None:
+                counts[value] = counts.get(value, 0) + item["counts"]
+    return counts
+
+
+def _ranked_count_payload(counts: dict[str, int], top: int):
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top]
+    return [{"value": value, "count": count} for value, count in ranked]
+
+
+def _emit_count_payload(ctx, payload) -> None:
+    if ctx.obj.get("json"):
+        _emit_json(ctx, payload)
+        return
+    for row in payload:
+        click.echo(f"  {row['count']:>8,}  {row['value']}")
+
+
+def _enumerate_place_values(
+    ctx, bbox, release, top, column_name: str, struct_field: str | None = None,
+) -> None:
+    reader = record_batch_reader("place", bbox, release, None, None, True)
+    if reader is None:
+        if ctx.obj.get("json"):
+            _emit_json(ctx, [])
+        return
+    counts = _count_reader_values(reader, column_name, struct_field)
+    _emit_count_payload(ctx, _ranked_count_payload(counts, top))
+
+
 @cli.command()
 @click.option("-t", "--type", "type_",
               type=str, default="place", show_default=True,
@@ -981,47 +1042,30 @@ def categories(ctx, type_, bbox, in_place, top, release):
             f"`categories` only enumerates `taxonomy.primary` for place features. "
             f"Run `botmap --json schema -t {type_}` to inspect available fields."
         )
-    if bbox is not None and in_place is not None:
-        raise click.UsageError("--bbox and --in are mutually exclusive")
-    if in_place is not None:
-        division = _resolve_in_place(in_place)
-        bbox = list(division.bbox)
+    bbox = _resolve_enumeration_bbox(bbox, in_place)
+    _enumerate_place_values(ctx, bbox, release, top, "taxonomy", "primary")
 
-    if bbox is None:
-        raise click.UsageError("Provide --bbox or --in; global enumeration is too costly.")
 
-    reader = record_batch_reader(type_, bbox, release, None, None, True)
-    if reader is None:
-        if ctx.obj.get("json"):
-            _emit_json(ctx, [])
-        return
-
-    import pyarrow.compute as pc
-
-    counts: dict[str, int] = {}
-    while True:
-        try:
-            batch = reader.read_next_batch()
-        except StopIteration:
-            break
-        if batch.num_rows == 0:
-            continue
-        cat_col = batch.column("taxonomy")
-        primary = pc.struct_field(cat_col, "primary")
-        for item in pc.value_counts(primary).to_pylist():
-            val = item["values"]
-            if val is None:
-                continue
-            counts[val] = counts.get(val, 0) + item["counts"]
-
-    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)[:top]
-    payload = [{"value": v, "count": c} for v, c in ranked]
-
-    if ctx.obj.get("json"):
-        _emit_json(ctx, payload)
-        return
-    for row in payload:
-        click.echo(f"  {row['count']:>8,}  {row['value']}")
+@cli.command("basic-categories")
+@click.option("-t", "--type", "type_",
+              type=str, default="place", show_default=True,
+              help="Feature type to enumerate. Only `place` is supported.")
+@click.option("--bbox", required=False, type=BboxParamType())
+@click.option("--in", "in_place", required=False, type=str)
+@click.option("--top", default=20, show_default=True, type=int)
+@click.option("-r", "--release", default=None, callback=validate_release,
+              required=False)
+@click.pass_context
+def basic_categories(ctx, type_, bbox, in_place, top, release):
+    """Enumerate `basic_category` values, sorted by count desc."""
+    if type_ != "place":
+        raise click.UsageError(
+            "`basic-categories` only enumerates `basic_category` for place "
+            "features. Run `botmap --json schema -t place` to inspect "
+            "place fields."
+        )
+    bbox = _resolve_enumeration_bbox(bbox, in_place)
+    _enumerate_place_values(ctx, bbox, release, top, "basic_category")
 
 
 @cli.command()
