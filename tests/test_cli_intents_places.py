@@ -17,7 +17,7 @@ class _DummyReader:
 
 
 class _FakeReaderWithCategories:
-    """Stub reader that surfaces a fixed list of categories.primary values."""
+    """Stub reader that surfaces a fixed list of taxonomy.primary values."""
     schema = object()
 
     def __init__(self, categories):
@@ -26,7 +26,7 @@ class _FakeReaderWithCategories:
             [{"primary": c} for c in categories],
             type=pa.struct([pa.field("primary", pa.string())]),
         )
-        self._batch = pa.record_batch([struct_arr], names=["categories"])
+        self._batch = pa.record_batch([struct_arr], names=["taxonomy"])
         self._yielded = False
 
     def read_next_batch(self):
@@ -77,7 +77,7 @@ def test_places_with_category(monkeypatch):
         assert captured["type"] == "place"
         assert captured["bbox"] == [-71.19, 42.23, -70.99, 42.40]
         cats = [f for f in captured["where_filters"]
-                if f.key == "categories.primary"]
+                if f.key == "taxonomy.primary"]
         assert len(cats) == 1
         assert cats[0].value == "restaurant"
 
@@ -105,7 +105,7 @@ def test_places_with_bbox(monkeypatch):
         assert captured["type"] == "place"
         assert captured["bbox"] == [-122.295, 37.778, -122.265, 37.800]
         cats = [f for f in captured["where_filters"]
-                if f.key == "categories.primary"]
+                if f.key == "taxonomy.primary"]
         assert cats and cats[0].value == "coffee_shop"
 
 
@@ -130,7 +130,7 @@ def test_places_requires_in_or_bbox(monkeypatch):
 
 
 def test_places_zero_results_emits_category_suggestion(monkeypatch):
-    """When categories.primary=X returns 0 rows, the CLI suggests near matches."""
+    """When taxonomy.primary=X returns 0 rows, the CLI suggests near matches."""
     _setup(monkeypatch)
 
     # First reader (the filtered query) returns 0 rows.
@@ -165,7 +165,7 @@ def test_places_zero_results_emits_category_suggestion(monkeypatch):
 
 
 def test_places_zero_results_no_category_filter_no_hint(monkeypatch):
-    """Without a categories.primary filter, no suggestion scan runs."""
+    """Without a taxonomy.primary filter, no suggestion scan runs."""
     _setup(monkeypatch)
     monkeypatch.setattr("botmap.cli.record_batch_reader",
                         lambda *a, **k: _DummyReader())
