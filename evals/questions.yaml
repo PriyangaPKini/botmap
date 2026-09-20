@@ -41,6 +41,58 @@
   place: "Brooklyn, US-NY"
   notes: "Ideal: categories -t place --in Brooklyn (then filter to restaurant_* values)"
 
+- id: asian-restaurants-rollup
+  question: "How many Asian restaurants are in Cambridge, Massachusetts?"
+  tier: 2
+  download_is_legitimate: false
+  target_type: place
+  place: "Cambridge, MA"
+  notes: "Taxonomy redesign target. Ideal after the change: count places under the Asian restaurant parent category with taxonomy.hierarchy contains asian_restaurant, rather than guessing one leaf category or building a long manual list."
+
+- id: basic-category-rollup
+  question: "How many drugstores and pharmacies are there in Cambridge, Massachusetts?"
+  tier: 2
+  download_is_legitimate: false
+  target_type: place
+  place: "Cambridge, MA"
+  notes: "Taxonomy redesign target. Ideal after the change: discover the broad value with basic-categories --find pharmacy, then count places with --basic-category pharmacy_and_drug_store."
+
+- id: tattoo-category-discovery
+  question: "Where can I get a tattoo in Cambridge, Massachusetts?"
+  tier: 2
+  download_is_legitimate: false
+  target_type: place
+  place: "Cambridge, MA"
+  notes: "Taxonomy redesign target. Ideal after the change: categories --in 'Cambridge, MA' --find tattoo, then places --category with the returned taxonomy.primary value."
+
+- id: petrol-pumps-cambridge
+  question: "How many petrol pumps are there in Cambridge, Massachusetts?"
+  tier: 2
+  download_is_legitimate: false
+  target_type: place
+  place: "Cambridge, MA"
+  notes: "Taxonomy redesign target. The stored category is gas_station, so --find petrol is not enough. Success requires translating the regional wording to gas or fuel before category discovery or counting."
+
+- id: bus-stops-cambridge
+  question: "How many bus stops are there in Cambridge, Massachusetts?"
+  tier: 3
+  download_is_legitimate: false
+  target_type: place
+  place: "Cambridge, MA"
+  notes: "Taxonomy redesign target. Ideal: places --in 'Cambridge, MA' --category bus_station. The old bus_stop value returns zero, so the zero-result hint and updated Skill docs should help."
+
+- id: pharmacy-near-address
+  question: "What's the nearest pharmacy to 770 Massachusetts Avenue, Cambridge MA?"
+  tier: 4
+  download_is_legitimate: false
+  target_type: [address, place]
+  place: "Cambridge, MA"
+  notes: "Taxonomy redesign target. Geocode the address first, then use at with --where taxonomy.primary=pharmacy. The old Skill recipe used an at --category flag that does not exist."
+  subtasks:
+    - "addresses --in 'Cambridge, MA' --street Massachusetts --number 770"
+    - "at LAT,LON -t place --where taxonomy.primary=pharmacy -r 2000 -n 5"
+    - "compute distances in code; at emits no distance field"
+
 - id: pois-near-point
   question: "What POIs are within 150m of 40.7128,-74.0060?"
   tier: 3
