@@ -1,0 +1,3 @@
+{"argv": ["places", "--in", "Brooklyn", "--category", "cafe"], "exit_code": 0, "stdout": "", "stderr": "[botmap] 0 rows. No place has categories.primary='cafe' in this bbox. Did you mean: coffee_shop? Run `botmap categories -t place --bbox \u2026` to see the full list.\n", "duration": 4.21}
+{"argv": ["--json", "count", "-t", "place", "--in", "Brooklyn", "--where", "categories.primary=coffee_shop"], "exit_code": 0, "stdout": "{\"type\": \"place\", \"count\": 412, \"release\": \"2026-08-19.0\"}\n", "stderr": "", "duration": 2.78}
+{"argv": ["download", "-t", "place", "--bbox", "-74.05,40.57,-73.83,40.74", "-f", "geojsonseq", "-o", "places.geojsonseq"], "exit_code": 0, "stdout": "", "stderr": "[botmap] Tip: try instead: botmap places --in \"Brooklyn\"\n", "duration": 11.06}
