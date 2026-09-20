@@ -52,6 +52,11 @@ class ParsedFilter:
         # Top-level lookup
         top = parts[0]
         if top not in schema.names:
+            if self.key == "categories.primary" and _has_taxonomy_primary(schema):
+                raise ValueError(
+                    "Field 'categories.primary' is no longer present. "
+                    "Use 'taxonomy.primary' instead."
+                )
             raise ValueError(
                 f"Unknown field {self.key!r}. Available fields: "
                 f"{', '.join(sorted(schema.names))}"
@@ -71,6 +76,20 @@ class ParsedFilter:
                     f"Available subfields: {', '.join(sorted(child_names))}"
                 )
             current_type = current_type.field(child_names.index(part)).type
+
+
+def _has_taxonomy_primary(schema: pa.Schema) -> bool:
+    """Return whether `schema` has the `taxonomy.primary` successor field."""
+    if "taxonomy" not in schema.names:
+        return False
+    taxonomy_type = schema.field("taxonomy").type
+    if not pa.types.is_struct(taxonomy_type):
+        return False
+    try:
+        taxonomy_type.field("primary")
+        return True
+    except KeyError:
+        return False
 
 
 def _coerce_scalar(raw: str) -> Union[str, int, float, bool]:
