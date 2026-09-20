@@ -109,6 +109,32 @@ def test_places_with_bbox(monkeypatch):
         assert cats and cats[0].value == "coffee_shop"
 
 
+def test_places_with_basic_category(monkeypatch):
+    _setup(monkeypatch)
+    captured = {}
+
+    def fake_reader(type_, bbox, *a, where_filters=None, **k):
+        captured["type"] = type_
+        captured["bbox"] = bbox
+        captured["where_filters"] = where_filters
+        return _DummyReader()
+
+    monkeypatch.setattr("botmap.cli.record_batch_reader", fake_reader)
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, [
+            "places", "--in", "Boston, MA",
+            "--basic-category", "restaurant",
+            "-f", "geojson", "-o", "out.geojson",
+        ])
+        assert result.exit_code == 0, result.output
+        filters = captured["where_filters"]
+        basic_categories = [f for f in filters if f.key == "basic_category"]
+        assert len(basic_categories) == 1
+        assert basic_categories[0].value == "restaurant"
+
+
 def test_places_in_and_bbox_mutually_exclusive(monkeypatch):
     _setup(monkeypatch)
     runner = CliRunner()

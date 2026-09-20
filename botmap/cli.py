@@ -1132,6 +1132,8 @@ def cache_build_cmd():
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
 @click.option("--category", required=False, type=str,
               help="Shortcut for --where taxonomy.primary=VAL")
+@click.option("--basic-category", required=False, type=str,
+              help="Shortcut for --where basic_category=VAL")
 @click.option("--where", "where_exprs", multiple=True)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
@@ -1142,8 +1144,11 @@ def cache_build_cmd():
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.option("--json", "json_no_op", is_flag=True, default=False, hidden=True)
-def places(in_place, bbox, category, where_exprs, limit, output_format, output, release, json_no_op):
-    """Download POIs in a named place. Filter by --category for common asks."""
+def places(
+    in_place, bbox, category, basic_category, where_exprs, limit,
+    output_format, output, release, json_no_op,
+):
+    """Download POIs in a named place. Filter by category flags for common asks."""
     if bbox is not None and in_place is not None:
         raise click.UsageError("--bbox and --in are mutually exclusive")
     if bbox is None and in_place is None:
@@ -1161,6 +1166,10 @@ def places(in_place, bbox, category, where_exprs, limit, output_format, output, 
     if category is not None:
         filters.append(ParsedFilter(
             key="taxonomy.primary", op="=", value=category,
+        ))
+    if basic_category is not None:
+        filters.append(ParsedFilter(
+            key="basic_category", op="=", value=basic_category,
         ))
 
     if output_format == "geoparquet" and output is None:
