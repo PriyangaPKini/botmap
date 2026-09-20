@@ -14,7 +14,7 @@ or a kind of feature on the map — even when they don't use geo terminology.
 
 Triggering phrases (illustrative, not exhaustive):
 
-- *"How many coffee shops are in Brooklyn?"* → `where` + `count -t place --in Brooklyn --where categories.primary=coffee_shop`
+- *"How many coffee shops are in Brooklyn?"* → `where` + `count -t place --in Brooklyn --where taxonomy.primary=coffee_shop`
 - *"Find hospitals in Manhattan"* → `places --in "Manhattan" --category hospital`
 - *"Show buildings taller than 100m in Chicago"* → `buildings --in "Chicago, IL" --where 'height>100'`
 - *"What highways run through Texas?"* → `roads --in "Texas, USA" --class motorway`
@@ -98,7 +98,7 @@ botmap --json count -t building --in "Manhattan"
 
 ### 3. Sample to confirm shape before committing
 ```bash
-botmap sample -t place --in "Boston, MA" --where categories.primary=restaurant -n 5
+botmap sample -t place --in "Boston, MA" --where taxonomy.primary=restaurant -n 5
 ```
 
 ### 4. POIs by category
@@ -129,11 +129,11 @@ botmap roads --in "Alameda County, CA" --class cycleway \
 
 ### 7. What's near a point (distance-sorted)
 ```bash
-# `at` returns the N features CLOSEST to the point, ordered by distance —
-# this is the tool for "near X" questions. --radius (meters) bounds the
-# search; --category / --where filter it.
+# `at` returns the N features CLOSEST to the point, ordered by distance.
+# This is the tool for "near X" questions. --radius bounds the search.
+# Use --where for category filters.
 botmap at 40.7484,-73.9857 -t place -n 10
-botmap at 40.7484,-73.9857 -t place --category pharmacy --radius 250 -n 10
+botmap at 40.7484,-73.9857 -t place --where taxonomy.primary=pharmacy --radius 250 -n 10
 ```
 
 ### 8. Which admin areas contain a point
@@ -144,8 +144,15 @@ botmap --json containing 40.7484,-73.9857
 
 ### 9. Discover what categories exist in a place
 ```bash
+# Specific place categories.
 botmap --json categories -t place --in "Brooklyn" --top 20
+
+# Broad place categories.
+botmap --json basic-categories -t place --in "Brooklyn" --top 20
 ```
+
+Use `--category` for specific leaf categories such as `asian_restaurant` or `coffee_shop`.
+Use `--basic-category` for broad groups such as `restaurant` or `cafe`.
 
 ### 10. Discover what's queryable on a type
 ```bash
@@ -157,7 +164,7 @@ botmap --json schema -t building
 ```bash
 BBOX=$(botmap --json where "Berlin" | jq -r '.bbox | join(",")')
 botmap download -t place --bbox "$BBOX" \
-  --where categories.primary=hotel \
+  --where taxonomy.primary=hotel \
   -f geojsonseq -o berlin_hotels.jsonl
 ```
 
@@ -182,7 +189,7 @@ botmap landuse --in "Brooklyn, NY" --class residential \
 
 ### 15. Bus stops and other transit POIs
 ```bash
-# Transit stops are PLACES (categories.primary), not infrastructure.
+# Transit stops are PLACES (taxonomy.primary), not infrastructure.
 botmap places --in "Williamsburg, NY" --category bus_stop \
   -f geojsonseq -o busstops.jsonl
 ```
@@ -207,7 +214,7 @@ botmap addresses --bbox -71.07,42.35,-71.06,42.36 --postcode 02108
 
 | Type | Theme | Key properties |
 |---|---|---|
-| `place` | places | `categories.primary` (hotel, restaurant, cafe, hospital, **bus_stop, bus_station, train_station**, ...), `names.primary`, `confidence`, `addresses` |
+| `place` | places | `taxonomy.primary` (hotel, restaurant, cafe, hospital, **bus_stop, bus_station, train_station**, ...), `basic_category`, `names.primary`, `confidence`, `addresses` |
 | `building` | buildings | `height` (meters), `num_floors`, `class`, `subtype`, `roof_shape` |
 | `segment` | transportation | `class` — covers ALL segments, not just car roads: motorway, primary, secondary, residential, **footway, path, cycleway**, sidewalk; plus `subclass`, `surface`, `speed_limits`. Use the `roads` verb with `--class`. |
 | `division` | divisions | `subtype` (country, region, county, locality, neighborhood, ...), `admin_level`, `population`. Use `where … --geometry` for the boundary polygon. |
@@ -223,7 +230,7 @@ Operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`. Keys are dot-paths into the
 type's schema. Multiple `--where` flags AND together.
 
 ```
---where categories.primary=restaurant
+--where taxonomy.primary=restaurant
 --where 'height>100'
 --where "class in [motorway,primary,trunk]"
 ```

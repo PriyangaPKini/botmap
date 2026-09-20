@@ -266,6 +266,26 @@ botmap changelog summary [OPTIONS]
 - No bbox; scans full theme/type.
 - Prints grand totals when >1 type in results.
 
+### 5.5 Place category commands
+
+`places --category VALUE` filters `taxonomy.primary`. `places --basic-category
+VALUE` filters `basic_category`. The two flags are independent and may be used
+together with other `--where` filters.
+
+`categories -t place` enumerates `taxonomy.primary` values for a place-scoped
+region. `basic-categories -t place` enumerates `basic_category` values for a
+place-scoped region. Both commands require `--bbox` or `--in`, and both return
+the same shape in JSON mode:
+
+```json
+[{"value": "restaurant", "count": 10}]
+```
+
+If a schema has `taxonomy.primary` but no `categories.primary`, raw filters on
+`categories.primary` raise a usage error that names `taxonomy.primary` as the
+successor. If both fields are present, `categories.primary` remains a valid raw
+field path.
+
 ---
 
 ## 6. Writer Specification

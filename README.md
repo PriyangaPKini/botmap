@@ -81,7 +81,7 @@ end to end:
 ```bash
 # "Where is Brooklyn, and how many coffee shops does it have?"
 botmap where "Brooklyn"
-botmap count -t place --in "Brooklyn" --where categories.primary=coffee_shop
+botmap count -t place --in "Brooklyn" --where taxonomy.primary=coffee_shop
 
 # "Get them as GeoJSON"
 botmap places --in "Brooklyn" --category coffee_shop -f geojsonseq -o brooklyn_coffee.jsonl
@@ -118,7 +118,7 @@ botmap places --in "Brooklyn" --category coffee_shop --where 'confidence>0.8' \
 botmap places --in "Berlin, DE" --category hotel -f geojsonseq -o berlin_hotels.jsonl
 
 # Pharmacies near the Empire State Building (~250m)
-botmap at 40.7484,-73.9857 -t place --category pharmacy --radius 250 -n 20
+botmap at 40.7484,-73.9857 -t place --where taxonomy.primary=pharmacy --radius 250 -n 20
 ```
 
 ### Discovering before downloading
@@ -245,7 +245,7 @@ when scripting against the CLI.
 # Resolve a bbox, then download with it
 BBOX=$(botmap --json where "Berlin, DE" | jq -r '.bbox | join(",")')
 botmap download -t place --bbox "$BBOX" \
-  --where categories.primary=hotel \
+  --where taxonomy.primary=hotel \
   -f geojsonseq -o berlin_hotels.jsonl
 
 # Top-3 categories in a place, then dump features for each
@@ -274,7 +274,7 @@ botmap --json categories -t place --in "Brooklyn" --top 50 | jq -r '.[].value' |
 # > coffee_shop
 
 # 3. Count
-botmap --json count -t place --in "Brooklyn" --where categories.primary=coffee_shop
+botmap --json count -t place --in "Brooklyn" --where taxonomy.primary=coffee_shop
 # > {"count": 412, ...}
 
 # 4. Download if needed
@@ -341,7 +341,7 @@ precede any `download`.
 
 ```bash
 botmap count -t place --in "Boston, MA"
-botmap --json count -t place --in "Boston, MA" --where categories.primary=restaurant
+botmap --json count -t place --in "Boston, MA" --where taxonomy.primary=restaurant
 ```
 
 #### `sample`
@@ -350,7 +350,7 @@ Emit the first N features matching a query. Defaults to `geojsonseq` and N=10.
 
 ```bash
 botmap sample -t building --in "Brooklyn" --where 'height>100' -n 5
-botmap sample -t place --in "Brooklyn" --where categories.primary=coffee_shop -n 3
+botmap sample -t place --in "Brooklyn" --where taxonomy.primary=coffee_shop -n 3
 ```
 
 #### `themes`, `types`, `schema`
@@ -365,11 +365,20 @@ botmap --json schema -t place       # full field list + a sample feature
 
 #### `categories -t place`
 
-Enumerate `categories.primary` values (with counts) for a place-scoped region.
+Enumerate `taxonomy.primary` values (with counts) for a place-scoped region.
 
 ```bash
 botmap categories -t place --in "Brooklyn" --top 20
 botmap --json categories -t place --in "Manhattan" --top 50 | jq -r '.[] | "\(.count)\t\(.value)"'
+```
+
+#### `basic-categories -t place`
+
+Enumerate `basic_category` values (with counts) for a place-scoped region.
+
+```bash
+botmap basic-categories -t place --in "Brooklyn" --top 20
+botmap --json basic-categories -t place --in "Manhattan" --top 20
 ```
 
 #### `capabilities`
@@ -385,9 +394,10 @@ botmap --json capabilities | jq '.commands[].name'
 
 Intent verbs that wrap `download` with a familiar shape. Each accepts either
 `--in "Place Name"` (resolved via the divisions index) or `--bbox xmin,ymin,xmax,ymax`.
-`--category` / `--class` / `--street` desugar to common `--where` filters,
-and `--where` is still available for advanced predicates. `water` and `landuse`
-take `--class` just like `roads`. Running `download -t TYPE` for a type covered
+`--category` / `--basic-category` / `--class` / `--street` desugar to common
+`--where` filters, and `--where` is still available for advanced predicates.
+`water` and `landuse` take `--class` just like `roads`. Running
+`download -t TYPE` for a type covered
 by one of these verbs prints a one-line stderr tip pointing at the verb. All
 data verbs accept a trailing `--json` flag silently (they already emit GeoJSON).
 
@@ -401,6 +411,9 @@ botmap places --in "Brooklyn" --category hospital -f geojsonseq -o hospitals.jso
 
 # POIs by category (manual bbox — skip the named-place lookup)
 botmap places --bbox=-122.295,37.778,-122.265,37.800 --category coffee_shop
+
+# POIs by broad category
+botmap places --in "Cambridge, MA" --basic-category pharmacy_and_drug_store
 
 # Buildings filtered by attribute
 botmap buildings --in "Manhattan" --where 'height>150' -f geojsonseq -o tall.jsonl
@@ -420,14 +433,14 @@ botmap landuse --in "Brooklyn, NY" --class residential -f geojsonseq -o zoning.j
 ```
 
 `places` includes a zero-result hint: when `--category X` (or
-`--where categories.primary=X`) returns 0 rows AND that value isn't
+`--where taxonomy.primary=X`) returns 0 rows AND that value isn't
 present in the bbox, the CLI scans the bbox once for the live category
 list and emits a stderr suggestion of up to 3 near-matches drawn from
 what's actually there. So `--category ferry_terminal` in a bbox where
 only `ferry_boat_company` exists yields:
 
 ```
-[botmap] 0 rows. No place has categories.primary='ferry_terminal' in
+[botmap] 0 rows. No place has taxonomy.primary='ferry_terminal' in
 this bbox. Did you mean: ferry_boat_company? Run `botmap categories
 -t place --bbox …` to see the full list.
 ```
@@ -446,7 +459,7 @@ filters apply just like the intent verbs, so this is the right command for
 ```bash
 botmap at 40.7484,-73.9857                          # POIs near the Empire State Building
 botmap at 37.8270,-122.4230 -t place \
-  --radius 1500 --where "categories.primary=restaurant" -n 5
+  --radius 1500 --where "taxonomy.primary=restaurant" -n 5
 botmap at 51.5074,-0.1278 -t building -n 3
 ```
 
