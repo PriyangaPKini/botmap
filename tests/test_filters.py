@@ -192,3 +192,32 @@ class TestValidateAgainstSchema:
         with pytest.raises(ValueError) as exc:
             f.validate_against_schema(schema)
         assert "a.b is not a struct" in str(exc.value)
+
+
+class TestUnknownOperator:
+    def test_named_operator_is_reported(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name like cafe")
+        msg = str(exc.value)
+        assert "like" in msg
+        assert "'in'" in msg or " in," in msg or "in," in msg
+        assert "~" in msg
+
+    def test_lists_the_supported_operators(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("class isnt motorway")
+        msg = str(exc.value)
+        for op in ("=", "!=", "<=", ">=", "in", "~"):
+            assert op in msg, f"{op!r} missing from {msg!r}"
+
+    def test_no_operator_keeps_the_shell_redirection_hint(self):
+        """A single token has no operator at all; that hint must survive."""
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("height150")
+        assert "no operator" in str(exc.value).lower()
+        assert "single quotes" in str(exc.value)
+
+    def test_unknown_operator_beats_the_generic_message(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name like cafe")
+        assert "no operator" not in str(exc.value).lower()

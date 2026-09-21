@@ -132,6 +132,23 @@ def _parse_list_value(raw: str) -> List[Any]:
     return [_coerce_scalar(p) for p in parts]
 
 
+def _reject_unknown_operator(expr: str) -> None:
+    """Name the word a caller used as an operator, when it isn't one.
+
+    `name like cafe` reads as K OP V but `like` is not supported. Saying so
+    beats the generic "no operator" hint, which sends the caller looking for
+    a shell-quoting problem they do not have.
+    """
+    parts = expr.split()
+    if len(parts) < 3:
+        return
+    supported = ", ".join(repr(o.strip()) for o in _OPERATORS)
+    raise ValueError(
+        f"Unsupported operator {parts[1]!r} in filter {expr!r}. "
+        f"Supported operators: {supported}."
+    )
+
+
 def parse_where_expr(expr: str) -> ParsedFilter:
     """Parse a single --where expression of the form 'KEY OP VALUE'."""
     # Locate the leftmost occurrence of any operator, preferring longer matches.
@@ -147,6 +164,7 @@ def parse_where_expr(expr: str) -> ParsedFilter:
             best_op = op
 
     if best_op is None:
+        _reject_unknown_operator(expr)
         raise ValueError(
             f"Filter {expr!r} has no operator. Use K OP V, e.g. "
             f"--where 'height>150'. If you typed an unquoted > or <, your "
