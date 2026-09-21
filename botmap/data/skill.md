@@ -151,8 +151,36 @@ botmap --json categories -t place --in "Brooklyn" --top 20
 botmap --json basic-categories -t place --in "Brooklyn" --top 20
 ```
 
-Use `--category` for specific leaf categories such as `asian_restaurant` or `coffee_shop`.
-Use `--basic-category` for broad groups such as `restaurant` or `cafe`.
+`--category` and `--basic-category` are flags on the `places` verb only. They
+filter two separate vocabularies: `--category` matches `taxonomy.primary`,
+`--basic-category` matches a curated `basic_category` set roughly an order of
+magnitude smaller. `basic_category` is the broader of the two — many primary
+categories roll up to one basic value — but how much broader varies by subject,
+because Overture curated each basic value at whatever level suited it. So
+enumerate both and pick the value that matches the question:
+
+```bash
+botmap --json categories -t place --in "…" --top 500        # taxonomy.primary
+botmap --json basic-categories -t place --in "…" --top 500  # basic_category
+```
+
+A `taxonomy.primary` value is not necessarily a leaf. `asian_restaurant` has
+`chinese_restaurant`, `thai_restaurant` and others beneath it, so filtering on
+it returns only places labelled `asian_restaurant` itself, not everything
+underneath. There is no roll-up filter yet; to cover a whole branch today,
+enumerate with `categories` and pass the values you want:
+
+```bash
+--where 'taxonomy.primary in [asian_restaurant,chinese_restaurant,thai_restaurant]'
+```
+
+On every other command — `count`, `sample`, `at`, `download` — filter with
+`--where` instead. There is no `--category` flag on those:
+
+```bash
+botmap --json count -t place --in "Cambridge, MA" --where taxonomy.primary=coffee_shop
+botmap --json count -t place --in "Cambridge, MA" --where basic_category=restaurant
+```
 
 ### 10. Discover what's queryable on a type
 ```bash
