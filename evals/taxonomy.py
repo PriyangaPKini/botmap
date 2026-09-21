@@ -22,7 +22,7 @@ def classify_error(call: ShimCall) -> str | None:
     if call.exit_code == 0:
         if "did you mean:" in low:
             return "bad_category_value"
-        if "0 rows" in low and "categories.primary" in low:
+        if "0 rows" in low and _mentions_place_category_field(low):
             return "bad_category_value"
         return None
 
@@ -42,3 +42,7 @@ def classify_error(call: ShimCall) -> str | None:
     if "usage:" in low and "error:" in low:
         return "bad_option"
     return "other_error"
+
+
+def _mentions_place_category_field(message: str) -> bool:
+    return "categories.primary" in message or "taxonomy.primary" in message

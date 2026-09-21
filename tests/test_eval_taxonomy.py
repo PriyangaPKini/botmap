@@ -17,12 +17,12 @@ def test_ambiguous_warning_is_not_an_error():
 
 
 def test_bad_category_value_from_did_you_mean_hint():
-    stderr = "[botmap] 0 rows. No place has categories.primary='cafe'. Did you mean: coffee_shop?"
+    stderr = "[botmap] 0 rows. No place has taxonomy.primary='cafe'. Did you mean: coffee_shop?"
     assert classify_error(_call(0, stderr)) == "bad_category_value"
 
 
 def test_bad_category_value_from_not_present_hint():
-    stderr = "[botmap] 0 rows. categories.primary='zzz' is not present in this bbox."
+    stderr = "[botmap] 0 rows. taxonomy.primary='zzz' is not present in this bbox."
     assert classify_error(_call(0, stderr)) == "bad_category_value"
 
 
