@@ -516,29 +516,6 @@ def download(
             f"[botmap] Tip: try instead: {suggestion}",
             fg="bright_black", err=True,
         )
-    elif type_ == "infrastructure":
-        _TRANSIT_CLASSES = {"bus_stop", "bus_station", "train_station", "transit"}
-        is_transit = any(
-            (e.startswith("class=") and e.split("=", 1)[1].strip() in _TRANSIT_CLASSES)
-            or e.startswith("subtype=transit")
-            for e in (where_exprs or [])
-        )
-        if is_transit:
-            loc_flag = (
-                f'--in "{in_place}"' if in_place
-                else (f"--bbox {bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else "--in <place>")
-            )
-            raise click.UsageError(
-                f"Transit stops are `place` features, not infrastructure — run: "
-                f"botmap places --category bus_stop {loc_flag}"
-            )
-        click.secho(
-            "[botmap] Tip: transit stops (bus_stop, bus_station, "
-            "train_station) are `place` features — use "
-            "`botmap places --category bus_stop`. "
-            "For non-transit infrastructure, download is correct.",
-            fg="bright_black", err=True,
-        )
 
     # Resolve --in to bbox
     if in_place is not None:
