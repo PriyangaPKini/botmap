@@ -41,6 +41,16 @@ from .cache import cache_info, clear_cache, build_index, index_path
 from . import skill_installer
 
 
+# One description of --where for every command that takes it.
+WHERE_HELP = (
+    "Attribute filter K OP V; repeat to AND several. Operators: = != < <= > >= "
+    "in ~ contains. `~` is a case-insensitive substring match, not a regex. "
+    "`contains` keeps rows whose list field (e.g. taxonomy.hierarchy) holds one "
+    "value. Single-quote expressions with <, > or spaces: "
+    "--where 'height>50', --where 'taxonomy.hierarchy contains restaurant'."
+)
+
+
 def _safe_reader(type_, bbox, release, ct, rt, stac, **kw):
     """Wrap record_batch_reader, converting schema-validation ValueError."""
     try:
@@ -473,8 +483,7 @@ def cli(ctx, json_output):
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str,
               help="Resolve a place name to a bbox via the divisions index.")
-@click.option("--where", "where_exprs", multiple=True,
-              help="Attribute filter K OP V (repeatable). Example: --where height>50")
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option(
     "-f",
     "output_format",
@@ -793,7 +802,7 @@ def boundary(ctx, query):
               type=click.Choice(get_all_overture_types()), required=True)
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
@@ -836,7 +845,7 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
               type=click.Choice(get_all_overture_types()), required=True)
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", default=10, show_default=True, type=int,
               help="Maximum number of features to emit.")
 @click.option("-f", "output_format",
@@ -1186,7 +1195,7 @@ def cache_build_cmd():
               help="Shortcut for --where taxonomy.primary=VAL")
 @click.option("--basic-category", required=False, type=str,
               help="Shortcut for --where basic_category=VAL")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1250,7 +1259,7 @@ def places(
               help="Resolve a place name to a bbox via the divisions index.")
 @click.option("--bbox", required=False, type=BboxParamType(),
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1299,7 +1308,7 @@ def buildings(in_place, bbox, where_exprs, limit, output_format, output, release
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
 @click.option("--class", "road_class", required=False, type=str,
               help="Shortcut for --where class=VAL (e.g. motorway, primary)")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1351,7 +1360,7 @@ def roads(in_place, bbox, road_class, where_exprs, limit, output_format, output,
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
 @click.option("--class", "water_class", required=False, type=str,
               help="Shortcut for --where class=VAL (e.g. ocean, lake, river, stream)")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1404,7 +1413,7 @@ def water(in_place, bbox, water_class, where_exprs, limit, output_format, output
 @click.option("--class", "landuse_class", required=False, type=str,
               help="Shortcut for --where class=VAL "
                    "(e.g. commercial, residential, recreation, agriculture)")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1460,7 +1469,7 @@ def landuse(in_place, bbox, landuse_class, where_exprs, limit, output_format, ou
               help="House/building number (exact match; field is a string, so \"1208\" or \"1208A\").")
 @click.option("--postcode", required=False, type=str,
               help="Postal code (exact match).")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1526,9 +1535,7 @@ def addresses(in_place, bbox, street, number, postcode, where_exprs, limit,
 @click.option("-n", default=10, show_default=True, type=int)
 @click.option("-r", "--radius", type=int, required=False,
               help="Radius in meters; defaults per type.")
-@click.option("--where", "where_exprs", multiple=True,
-              help="Attribute filter K OP V (repeatable). "
-                   "Example: --where taxonomy.primary=coffee_shop")
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-f", "output_format",
               type=click.Choice(["geojson", "geojsonseq", "geoparquet"]),
               default="geojsonseq", show_default=True)
