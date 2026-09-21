@@ -1061,10 +1061,19 @@ def categories(ctx, type_, bbox, in_place, top, release):
 def basic_categories(ctx, type_, bbox, in_place, top, release):
     """Enumerate `basic_category` values, sorted by count desc."""
     if type_ != "place":
+        verb = TYPE_TO_VERB.get(type_)
+        if verb:
+            raise click.UsageError(
+                f"`basic-categories` enumerates `basic_category` for place "
+                f"features. For `{type_}`, the classifying field is `class` — "
+                f"run `botmap --json schema -t {type_}` to see available "
+                f"values, or filter directly with `botmap {verb} "
+                f"--class <value>`."
+            )
         raise click.UsageError(
-            "`basic-categories` only enumerates `basic_category` for place "
-            "features. Run `botmap --json schema -t place` to inspect "
-            "place fields."
+            f"`basic-categories` only enumerates `basic_category` for place "
+            f"features. Run `botmap --json schema -t {type_}` to inspect "
+            f"available fields."
         )
     bbox = _resolve_enumeration_bbox(bbox, in_place)
     _enumerate_place_values(ctx, bbox, release, top, "basic_category")
