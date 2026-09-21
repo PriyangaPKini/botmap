@@ -221,3 +221,17 @@ class TestUnknownOperator:
         with pytest.raises(ValueError) as exc:
             parse_where_expr("name like cafe")
         assert "no operator" not in str(exc.value).lower()
+
+
+class TestMissingOperatorIsNotMistakenForAnUnknownOne:
+    def test_value_words_keep_the_generic_message(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("names.primary Blue Bottle")
+        msg = str(exc.value)
+        assert "no operator" in msg.lower()
+        assert "Blue" not in msg.split("Filter")[0]
+
+    def test_operator_lookalike_is_named(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name LIKE cafe")
+        assert "Unsupported operator 'LIKE'" in str(exc.value)

@@ -12,6 +12,13 @@ import pyarrow.compute as pc
 # Operators ordered longest-first so the splitter doesn't mistake `>=` for `>`.
 _OPERATORS = ["<=", ">=", "!=", " in ", "=", "<", ">", "~"]
 
+# Words people type as operators that --where does not support. Naming them
+# beats the generic "no operator" message; other words are part of a value.
+_OPERATOR_LOOKALIKES = frozenset({
+    "like", "ilike", "is", "isnt", "not", "eq", "ne", "gt", "ge", "lt", "le",
+    "has", "match", "matches", "regex", "regexp", "startswith", "endswith",
+})
+
 # Operators that only make sense on a string field.
 _STRING_ONLY_OPERATORS = ("~",)
 
@@ -140,7 +147,7 @@ def _reject_unknown_operator(expr: str) -> None:
     a shell-quoting problem they do not have.
     """
     parts = expr.split()
-    if len(parts) < 3:
+    if len(parts) < 3 or parts[1].lower() not in _OPERATOR_LOOKALIKES:
         return
     supported = ", ".join(repr(o.strip()) for o in _OPERATORS)
     raise ValueError(
