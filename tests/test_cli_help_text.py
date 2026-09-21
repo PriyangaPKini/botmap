@@ -18,7 +18,7 @@ def _help(*args):
 @pytest.mark.parametrize("command", _commands_with_where())
 def test_where_help_lists_every_operator(command):
     text = _help(command)
-    for operator in ("~", "in"):
+    for operator in ("~", "contains", "in"):
         assert operator in text, f"{command} --help lacks {operator!r}"
     assert "substring" in text
 

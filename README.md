@@ -421,6 +421,9 @@ botmap places --bbox=-122.295,37.778,-122.265,37.800 --category coffee_shop
 # POIs by broad category
 botmap places --in "Cambridge, MA" --basic-category pharmacy_and_drug_store
 
+# A category and everything under it (chinese_restaurant, thai_restaurant, ...)
+botmap places --in "Cambridge, MA" --where 'taxonomy.hierarchy contains asian_restaurant'
+
 # Places whose name contains a word (case-insensitive substring, not a regex)
 botmap places --in "Cambridge, MA" --where 'names.primary~pizza'
 
@@ -442,9 +445,13 @@ botmap landuse --in "Brooklyn, NY" --class residential -f geojsonseq -o zoning.j
 ```
 
 `--where` takes `K OP V` with these operators: `=`, `!=`, `<`, `<=`, `>`,
-`>=`, `in` and `~`. Repeat it to AND several filters.
+`>=`, `in`, `~` and `contains`. Repeat it to AND several filters.
 
 - `~` is a case-insensitive substring match on a text field, not a regex.
+- `contains` keeps rows whose list field holds one exact value. List fields
+  such as `taxonomy.hierarchy` accept only `contains`. Because it follows the
+  hierarchy, `taxonomy.hierarchy contains restaurant` finds `steakhouse`,
+  which `taxonomy.primary~restaurant` misses.
 - Single-quote any expression with `<`, `>` or spaces, or the shell will
   split or redirect it.
 

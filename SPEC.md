@@ -147,8 +147,10 @@ def record_batch_reader(
 ```
 
 - Returns a streaming `RecordBatchReader`; returns `None` if no data matches.
-- `where_filters` are parsed `--where` expressions (§5.6).
-- `columns` projects the output to the named top-level fields.
+- `where_filters` are parsed `--where` expressions (§5.6). Most are pushed
+  down into the scan; `contains` filters run on each batch after it is read.
+- `columns` projects the output to the named top-level fields. Fields a
+  post-scan filter needs are read and then dropped again.
 - `bbox=None` queries globally (large data warning applies at CLI layer, not here).
 - `release=None` resolves to latest release.
 - When `stac=True`, uses STAC spatial index to minimize file scanning.
@@ -303,11 +305,20 @@ into the type's schema. Repeated `--where` flags AND together.
 | `=`, `!=`, `<`, `<=`, `>`, `>=` | comparison | scalar |
 | `in` | value is one of `[a,b,c]` | scalar |
 | `~` | case-insensitive substring, not a regex | string |
+| `contains` | list holds this one value | list |
 
 Filters are validated against the schema before any data is read. Each of
 these is a usage error that names the fix: an unknown field, an unknown
-operator (the message lists the supported ones), and `~` on a non-string
-field.
+operator (the message lists the supported ones), `~` on a non-string field,
+`contains` on a non-list field or on a list of records, a `contains` value
+that cannot match the list's item type, any other operator on a list field,
+and `contains [a,b]`.
+
+PyArrow has no list-membership kernel, so `contains` cannot be pushed down
+into the scan. `filters.combine()` returns the pushdown expression and the
+post-scan filters separately. `record_batch_reader` applies post-scan filters
+to each batch, and `count_rows` streams and sums instead of calling
+`dataset.count_rows(filter=)` when any exist.
 
 ---
 

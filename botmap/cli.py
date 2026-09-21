@@ -42,8 +42,10 @@ from . import skill_installer
 # One description of --where for every command that takes it.
 WHERE_HELP = (
     "Attribute filter K OP V; repeat to AND several. Operators: = != < <= > >= "
-    "in ~. `~` is a case-insensitive substring match, not a regex. "
-    "Single-quote expressions with <, > or spaces: --where 'height>50'."
+    "in ~ contains. `~` is a case-insensitive substring match, not a regex. "
+    "`contains` keeps rows whose list field (e.g. taxonomy.hierarchy) holds one "
+    "value. Single-quote expressions with <, > or spaces: "
+    "--where 'height>50', --where 'taxonomy.hierarchy contains restaurant'."
 )
 
 
