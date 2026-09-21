@@ -11,6 +11,7 @@ import pyarrow.dataset as ds
 import pyarrow.fs as fs
 import pyarrow.parquet as pq
 
+from .filters import ParsedFilter, apply_post_filters, combine, post_filter_fields
 from .models import BBox
 
 STAC_CATALOG_URL = "https://stac.overturemaps.org/catalog.json"
@@ -206,6 +207,7 @@ def _record_batch_reader_from_dataset(
     dataset: ds.Dataset,
     filter_expr=None,
     columns=None,
+    post_filters=(),
 ) -> Optional[pa.RecordBatchReader]:
     """
     Create a RecordBatchReader from an S3 dataset with optional filtering.
@@ -219,19 +221,16 @@ def _record_batch_reader_from_dataset(
     columns: list of str, optional
         Project to these columns only. An enumeration command reads one
         field out of ~28, so projecting avoids fetching the rest.
+    post_filters: list of ParsedFilter, optional
+        Filters the scan cannot push down, applied to each batch after it
+        is read. Fields they need are read and then dropped again.
 
     Returns
     -------
     RecordBatchReader with the feature data, or None if error occurs
     """
     try:
-        batches = dataset.to_batches(
-            columns=columns,
-            filter=filter_expr,
-            use_threads=True,
-            batch_readahead=16,
-            fragment_readahead=4,
-        )
+        batches = _scan_batches(dataset, filter_expr, columns, post_filters)
 
         # Filter out empty batches to avoid downstream issues
         non_empty_batches = (b for b in batches if b.num_rows > 0)
@@ -249,6 +248,26 @@ def _record_batch_reader_from_dataset(
         return None
 
 
+def _scan_batches(dataset, filter_expr, columns, post_filters):
+    """Scan `dataset`, apply post-scan filters, and project to `columns`."""
+    scan_columns = columns
+    if columns is not None and post_filters:
+        scan_columns = list(dict.fromkeys(columns + post_filter_fields(post_filters)))
+    batches = dataset.to_batches(
+        columns=scan_columns,
+        filter=filter_expr,
+        use_threads=True,
+        batch_readahead=16,
+        fragment_readahead=4,
+    )
+    if not post_filters:
+        return batches
+    filtered = (apply_post_filters(b, post_filters) for b in batches)
+    if scan_columns == columns:
+        return filtered
+    return (b.select(columns) for b in filtered)
+
+
 def _prepare_query(
     overture_type,
     bbox: BBox | tuple[float, float, float, float] | list[float] | None = None,
@@ -257,12 +276,13 @@ def _prepare_query(
     request_timeout=None,
     stac=False,
     where_filters=None,
-) -> Optional[Tuple[ds.Dataset, Optional[pc.Expression]]]:
+) -> Optional[Tuple[ds.Dataset, Optional[pc.Expression], List[ParsedFilter]]]:
     """
-    Resolve the S3 dataset and filter expression for a given query.
+    Resolve the S3 dataset and filters for a given query.
 
-    Returns the dataset and filter expression ready for counting or streaming,
-    or None if STAC reports no files intersect the bbox.
+    Returns the dataset, the filter expression the scan pushes down, and the
+    filters to apply after the scan, or None if STAC reports no files
+    intersect the bbox.
     """
     if release is None:
         release = get_latest_release()
@@ -297,13 +317,13 @@ def _prepare_query(
         ),
     )
 
+    post_filters = []
     if where_filters:
-        from .filters import combine
-        attr_expr = combine(list(where_filters), dataset.schema)
+        attr_expr, post_filters = combine(list(where_filters), dataset.schema)
         if attr_expr is not None:
             filter_expr = attr_expr if filter_expr is None else filter_expr & attr_expr
 
-    return dataset, filter_expr
+    return dataset, filter_expr, post_filters
 
 
 def count_rows(
@@ -322,8 +342,13 @@ def count_rows(
     )
     if result is None:
         return 0
-    dataset, filter_expr = result
-    return dataset.count_rows(filter=filter_expr)
+    dataset, filter_expr, post_filters = result
+    if not post_filters:
+        return dataset.count_rows(filter=filter_expr)
+    # count_rows(filter=) cannot apply post-scan filters, so stream and sum,
+    # reading only the fields those filters need.
+    batches = _scan_batches(dataset, filter_expr, post_filter_fields(post_filters), post_filters)
+    return sum(b.num_rows for b in batches)
 
 
 
@@ -344,9 +369,9 @@ def record_batch_reader(
     )
     if result is None:
         return None
-    dataset, filter_expr = result
+    dataset, filter_expr, post_filters = result
     return _record_batch_reader_from_dataset(
-        dataset, filter_expr=filter_expr, columns=columns)
+        dataset, filter_expr=filter_expr, columns=columns, post_filters=post_filters)
 
 
 def geodataframe(

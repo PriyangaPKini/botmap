@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, List, Union
+from typing import Any, List, Tuple, Union
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -21,6 +21,9 @@ _OPERATOR_LOOKALIKES = frozenset({
 
 # Operators that only make sense on a string field.
 _STRING_ONLY_OPERATORS = ("~",)
+
+# Operators applied to batches after the scan, because they cannot be pushed down.
+_POST_SCAN_OPERATORS = ("contains",)
 
 
 @dataclass(frozen=True)
@@ -235,14 +238,46 @@ def parse_where_expr(expr: str) -> ParsedFilter:
     return ParsedFilter(key=key, op=op, value=value)
 
 
-def combine(filters: List[ParsedFilter], schema: pa.Schema) -> pc.Expression | None:
-    """AND-combine filters, validating each against the schema."""
-    if not filters:
-        return None
+def combine(
+    filters: List[ParsedFilter], schema: pa.Schema,
+) -> Tuple[pc.Expression | None, List[ParsedFilter]]:
+    """Validate filters and split them into a scan expression and post-scan filters.
+
+    Most filters AND together into one expression the scan pushes down.
+    `contains` cannot be pushed down (see `list_contains_mask`), so those
+    filters come back separately for the caller to apply to each batch.
+    """
     for f in filters:
         f.validate_against_schema(schema)
-    exprs = [f.to_pyarrow_expression(schema) for f in filters]
-    result = exprs[0]
-    for e in exprs[1:]:
-        result = result & e
+    post_filters = [f for f in filters if f.op in _POST_SCAN_OPERATORS]
+    exprs = [f.to_pyarrow_expression(schema)
+             for f in filters if f.op not in _POST_SCAN_OPERATORS]
+    return _and_all(exprs), post_filters
+
+
+def apply_post_filters(batch: pa.RecordBatch, post_filters: List[ParsedFilter]) -> pa.RecordBatch:
+    """Keep the rows of `batch` that pass every post-scan filter."""
+    masks = [list_contains_mask(_column_at(batch, f.key), f.value) for f in post_filters]
+    return batch.filter(_and_all(masks))
+
+
+def post_filter_fields(post_filters: List[ParsedFilter]) -> List[str]:
+    """Top-level fields a scan must read so the post-scan filters can run."""
+    return list(dict.fromkeys(f.key.split(".")[0] for f in post_filters))
+
+
+def _column_at(batch: pa.RecordBatch, key: str) -> pa.Array:
+    """Resolve a dotted key such as `taxonomy.hierarchy` to a column of `batch`."""
+    top, *path = key.split(".")
+    column = batch.column(top)
+    return pc.struct_field(column, path) if path else column
+
+
+def _and_all(items):
+    """AND together expressions or masks; None when there are none."""
+    if not items:
+        return None
+    result = items[0]
+    for item in items[1:]:
+        result = result & item if isinstance(result, pc.Expression) else pc.and_(result, item)
     return result
