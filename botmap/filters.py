@@ -103,6 +103,20 @@ class ParsedFilter:
             )
 
 
+def list_contains_mask(column: pa.Array, value: Any) -> pa.BooleanArray:
+    """Return a row mask that is true where `column`'s list holds `value`.
+
+    This runs after the scan rather than inside it. PyArrow has no
+    list-membership kernel, and a scan filter must yield one value per row,
+    which `list_flatten` does not. So we flatten, find the matching elements,
+    and map each one back to the row it came from.
+    """
+    matching_rows = pc.filter(pc.list_parent_indices(column),
+                              pc.equal(pc.list_flatten(column), value))
+    row_numbers = pa.array(range(len(column)), type=pa.int64())
+    return pc.is_in(row_numbers, value_set=matching_rows)
+
+
 def _is_list_type(field_type: pa.DataType) -> bool:
     return (pa.types.is_list(field_type)
             or pa.types.is_large_list(field_type)
