@@ -63,8 +63,9 @@ to `download`:
    approximate `--bbox xmin,ymin,xmax,ymax` instead.
 3. **Count before pulling.** `botmap --json count -t TYPE --in "…"`.
 4. **Too many results?** Add `--where` / `--category` / `--class` filters, or
-   narrow the area with a tighter `--bbox`. Too few (or zero)? Widen the
-   `--bbox`, drop a filter, or check `categories`/`schema` for the right value.
+   narrow the area with a tighter `--bbox`. **Too few (or zero)?** Widen the
+   `--bbox`, drop a filter, or search the values with `categories --find`
+   (Recipe 9). Category values are singular: `restaurant`, not `restaurants`.
 5. **Preview, then pull.** `sample -n 5` (or any verb with `-n`) to confirm
    shape, then run the verb to get the full set.
 
@@ -144,12 +145,24 @@ botmap --json containing 40.7484,-73.9857
 
 ### 9. Discover what categories exist in a place
 ```bash
-# Specific place categories.
+# Specific place categories (taxonomy.primary).
 botmap --json categories -t place --in "Brooklyn" --top 20
 
-# Broad place categories.
+# Broad place categories (basic_category).
 botmap --json basic-categories -t place --in "Brooklyn" --top 20
 ```
+
+**Finding a category value.** Search the listed values with `--find` instead
+of dumping the list and grepping it:
+
+```bash
+botmap categories -t place --in "Cambridge, MA" --find vet --top 5
+# veterinarian, veterans_organization
+```
+
+`--find` is a case-insensitive substring match, not a search by meaning: `vet`
+also finds `veterans_organization`, and `animal` does not find `veterinarian`.
+It works the same way on `basic-categories`.
 
 `--category` and `--basic-category` are flags on the `places` verb only. They
 filter two separate vocabularies: `--category` matches `taxonomy.primary`,
@@ -254,14 +267,19 @@ Run `botmap --json schema -t TYPE` for the full field list of any type.
 
 ## Filter expression syntax
 
-Operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`. Keys are dot-paths into the
-type's schema. Multiple `--where` flags AND together.
+Operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `~`. Keys are dot-paths
+into the type's schema. Multiple `--where` flags AND together.
 
 ```
 --where taxonomy.primary=restaurant
 --where 'height>100'
 --where "class in [motorway,primary,trunk]"
+--where 'names.primary~pizza'
 ```
+
+- **`~`** is a case-insensitive substring match on a text field. It is not a
+  regular expression: `~^vet` looks for a literal caret. Spaces around it are
+  optional.
 
 **Always single-quote any `--where` expression containing `<` or `>`.**
 Unquoted, the shell treats `>` as a redirection: `--where height>150` writes a

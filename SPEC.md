@@ -141,10 +141,14 @@ def record_batch_reader(
     connect_timeout: int | None = None,
     request_timeout: int | None = None,
     stac: bool = False,
+    where_filters: list[ParsedFilter] | None = None,
+    columns: list[str] | None = None,
 ) -> pyarrow.RecordBatchReader | None
 ```
 
 - Returns a streaming `RecordBatchReader`; returns `None` if no data matches.
+- `where_filters` are parsed `--where` expressions (§5.6).
+- `columns` projects the output to the named top-level fields.
 - `bbox=None` queries globally (large data warning applies at CLI layer, not here).
 - `release=None` resolves to latest release.
 - When `stac=True`, uses STAC spatial index to minimize file scanning.
@@ -285,6 +289,25 @@ If a schema has `taxonomy.primary` but no `categories.primary`, raw filters on
 `categories.primary` raise a usage error that names `taxonomy.primary` as the
 successor. If both fields are present, `categories.primary` remains a valid raw
 field path.
+
+Both enumeration commands take `--find TEXT`, which keeps the listed values
+containing `TEXT`, ignoring case. It is a substring match, not a semantic one.
+
+### 5.6 Attribute filters (`--where`)
+
+Every command that takes `--where` parses `K OP V`, where `K` is a dot-path
+into the type's schema. Repeated `--where` flags AND together.
+
+| Operator | Meaning | Field type |
+|---|---|---|
+| `=`, `!=`, `<`, `<=`, `>`, `>=` | comparison | scalar |
+| `in` | value is one of `[a,b,c]` | scalar |
+| `~` | case-insensitive substring, not a regex | string |
+
+Filters are validated against the schema before any data is read. Each of
+these is a usage error that names the fix: an unknown field, an unknown
+operator (the message lists the supported ones), and `~` on a non-string
+field.
 
 ---
 
