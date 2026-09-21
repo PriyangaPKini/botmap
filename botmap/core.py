@@ -1,3 +1,4 @@
+import functools
 import io
 import json
 import re
@@ -268,6 +269,35 @@ def _scan_batches(dataset, filter_expr, columns, post_filters):
     return (b.select(columns) for b in filtered)
 
 
+@functools.lru_cache(maxsize=16)
+def _open_dataset(overture_type, bbox, release, connect_timeout, request_timeout, stac):
+    """Find the files for a query and open them as a dataset.
+
+    Returns None if STAC reports no files intersect `bbox`. Cached because
+    this costs about 3s of STAC and S3 round trips, and a zero-result hint
+    repeats it for the same area. A published release never changes, so a
+    cached dataset cannot go stale.
+    """
+    intersecting_files = None
+    if bbox and stac:
+        intersecting_files = _get_files_from_stac(
+            type_theme_map[overture_type], overture_type, BBox(*bbox), release
+        )
+        if intersecting_files is not None and len(intersecting_files) == 0:
+            return None
+
+    return ds.dataset(
+        intersecting_files if intersecting_files is not None
+        else _dataset_path(overture_type, release),
+        filesystem=fs.S3FileSystem(
+            anonymous=True,
+            region="us-west-2",
+            connect_timeout=connect_timeout,
+            request_timeout=request_timeout,
+        ),
+    )
+
+
 def _prepare_query(
     overture_type,
     bbox: BBox | tuple[float, float, float, float] | list[float] | None = None,
@@ -286,16 +316,13 @@ def _prepare_query(
     """
     if release is None:
         release = get_latest_release()
-    path = _dataset_path(overture_type, release)
     bbox_obj = _coerce_bbox(bbox)
-
-    intersecting_files = None
-    if bbox_obj and stac:
-        intersecting_files = _get_files_from_stac(
-            type_theme_map[overture_type], overture_type, bbox_obj, release
-        )
-        if intersecting_files is not None and len(intersecting_files) == 0:
-            return None
+    dataset = _open_dataset(
+        overture_type, bbox_obj.as_tuple() if bbox_obj else None, release,
+        connect_timeout, request_timeout, stac,
+    )
+    if dataset is None:
+        return None
 
     filter_expr = None
     if bbox_obj:
@@ -306,16 +333,6 @@ def _prepare_query(
             & (pc.field("bbox", "ymin") < ymax)
             & (pc.field("bbox", "ymax") > ymin)
         )
-
-    dataset = ds.dataset(
-        intersecting_files if intersecting_files is not None else path,
-        filesystem=fs.S3FileSystem(
-            anonymous=True,
-            region="us-west-2",
-            connect_timeout=connect_timeout,
-            request_timeout=request_timeout,
-        ),
-    )
 
     post_filters = []
     if where_filters:
@@ -350,6 +367,25 @@ def count_rows(
     batches = _scan_batches(dataset, filter_expr, post_filter_fields(post_filters), post_filters)
     return sum(b.num_rows for b in batches)
 
+
+
+# The two place category vocabularies. Older releases lack `basic_category`.
+_PLACE_CATEGORY_COLUMNS = ("taxonomy", "basic_category")
+
+
+def place_category_batches(bbox=None, release=None, stac=True):
+    """Stream only the place category columns in `bbox`, for zero-result hints.
+
+    Reading two columns instead of every field cuts the scan from about 6s to
+    about 2s on a city, and the dataset comes from the cache the failed
+    query just filled.
+    """
+    result = _prepare_query("place", bbox, release, stac=stac)
+    if result is None:
+        return iter(())
+    dataset, filter_expr, _ = result
+    columns = [c for c in _PLACE_CATEGORY_COLUMNS if c in dataset.schema.names]
+    return dataset.to_batches(columns=columns, filter=filter_expr, use_threads=True)
 
 
 def record_batch_reader(
