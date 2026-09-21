@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import operator
 from dataclasses import dataclass
 from typing import Any, List, Tuple, Union
 
@@ -282,13 +284,14 @@ def combine(
     post_filters = [f for f in filters if f.op in _POST_SCAN_OPERATORS]
     exprs = [f.to_pyarrow_expression(schema)
              for f in filters if f.op not in _POST_SCAN_OPERATORS]
-    return _and_all(exprs), post_filters
+    pushdown = functools.reduce(operator.and_, exprs) if exprs else None
+    return pushdown, post_filters
 
 
 def apply_post_filters(batch: pa.RecordBatch, post_filters: List[ParsedFilter]) -> pa.RecordBatch:
     """Keep the rows of `batch` that pass every post-scan filter."""
     masks = [list_contains_mask(_column_at(batch, f.key), f.value) for f in post_filters]
-    return batch.filter(_and_all(masks))
+    return batch.filter(functools.reduce(pc.and_, masks))
 
 
 def post_filter_fields(post_filters: List[ParsedFilter]) -> List[str]:
@@ -301,13 +304,3 @@ def _column_at(batch: pa.RecordBatch, key: str) -> pa.Array:
     top, *path = key.split(".")
     column = batch.column(top)
     return pc.struct_field(column, path) if path else column
-
-
-def _and_all(items):
-    """AND together expressions or masks; None when there are none."""
-    if not items:
-        return None
-    result = items[0]
-    for item in items[1:]:
-        result = result & item if isinstance(result, pc.Expression) else pc.and_(result, item)
-    return result
