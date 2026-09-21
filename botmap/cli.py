@@ -25,7 +25,7 @@ from .core import (
     get_all_overture_types,
     get_available_releases,
     get_latest_release,
-    place_category_batches,
+    column_batches,
     record_batch_reader,
     record_batch_reader_from_gers,
     type_theme_map,
@@ -34,7 +34,7 @@ from .models import Backend, BBox, PipelineState
 from .releases import list_releases, release_exists
 from .state import get_state_path, load_state, save_state
 from .writers import copy, get_writer
-from .category_taxonomy import category_pairs, zero_result_hint
+from .category_taxonomy import CATEGORY_COLUMNS, category_pairs, zero_result_hint
 from .filters import parse_where_expr, ParsedFilter
 from .geocoding import resolve
 from .cache import cache_info, clear_cache, build_index, index_path
@@ -121,7 +121,7 @@ def _emit_zero_result_hint(type_, bbox, release, where_filters) -> None:
         return
     field, value = target
     try:
-        pairs = category_pairs(place_category_batches(bbox, release))
+        pairs = category_pairs(column_batches("place", CATEGORY_COLUMNS, bbox, release))
     except OSError:
         return  # The hint is a courtesy; a failed scan must not fail the query.
     hint = zero_result_hint(field, value, pairs)

@@ -47,7 +47,7 @@ def zero_rows(monkeypatch):
     monkeypatch.setattr("botmap.cli.get_writer", lambda *a, **k: _NullWriter())
     monkeypatch.setattr("botmap.cli.copy", lambda *a, **k: 0)
     monkeypatch.setattr("botmap.cli.save_state", lambda *a, **k: None)
-    monkeypatch.setattr("botmap.cli.place_category_batches", category_batches)
+    monkeypatch.setattr("botmap.cli.column_batches", category_batches)
     return scans
 
 
@@ -99,8 +99,9 @@ def test_failed_hint_scan_leaves_the_result_intact(zero_rows, monkeypatch):
     def unreachable(*args, **kwargs):
         raise OSError("S3 unreachable")
 
-    monkeypatch.setattr("botmap.cli.place_category_batches", unreachable)
+    monkeypatch.setattr("botmap.cli.column_batches", unreachable)
     result = _run("count", "-t", "place", "--bbox", _BBOX,
                   "--where", "basic_category=veterinarian")
     assert result.exit_code == 0
     assert result.stdout.strip() == "0"
+

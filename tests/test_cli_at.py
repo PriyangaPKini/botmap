@@ -76,7 +76,7 @@ def test_at_passes_where_filters(monkeypatch, tmp_path):
     monkeypatch.setattr("botmap.cli.get_latest_release",
                         lambda: "2025-12-17.0")
     monkeypatch.setattr("botmap.cli.record_batch_reader", fake_reader)
-    monkeypatch.setattr("botmap.cli.place_category_batches", lambda *a, **k: [])
+    monkeypatch.setattr("botmap.cli.column_batches", lambda *a, **k: [])
 
     runner = CliRunner()
     with runner.isolated_filesystem():

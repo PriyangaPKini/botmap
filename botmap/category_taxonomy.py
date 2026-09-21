@@ -16,6 +16,9 @@ import pyarrow.compute as pc
 
 CategoryPair = Tuple[Optional[str], Optional[str]]
 
+# The columns holding both vocabularies. Older releases lack `basic_category`.
+CATEGORY_COLUMNS = ("taxonomy", "basic_category")
+
 
 def category_pairs(batches: Iterable[pa.RecordBatch]) -> Set[CategoryPair]:
     """Collect every distinct `(taxonomy.primary, basic_category)` pair.

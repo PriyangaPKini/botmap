@@ -164,7 +164,7 @@ def test_places_zero_results_emits_category_suggestion(monkeypatch):
         "ferry_terminal", "ferry_service", "ferry_boat_company",
         "coffee_shop", "restaurant", "hospital",
     ])
-    monkeypatch.setattr("botmap.cli.place_category_batches",
+    monkeypatch.setattr("botmap.cli.column_batches",
                         lambda *a, **k: [categories.read_next_batch()])
     # copy() returns rows_written; force 0 to trigger the hint.
     monkeypatch.setattr("botmap.cli.copy", lambda r, w: 0)

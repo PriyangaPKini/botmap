@@ -369,23 +369,19 @@ def count_rows(
 
 
 
-# The two place category vocabularies. Older releases lack `basic_category`.
-_PLACE_CATEGORY_COLUMNS = ("taxonomy", "basic_category")
+def column_batches(overture_type, columns, bbox=None, release=None, stac=True):
+    """Stream only `columns` of `overture_type` in `bbox`, skipping any the release lacks.
 
-
-def place_category_batches(bbox=None, release=None, stac=True):
-    """Stream only the place category columns in `bbox`, for zero-result hints.
-
-    Reading two columns instead of every field cuts the scan from about 6s to
-    about 2s on a city, and the dataset comes from the cache the failed
-    query just filled.
+    Meant for a follow-up scan of an area just queried: the dataset comes
+    from the cache that query filled, and reading a few columns instead of
+    every field cuts a city-sized scan from about 6s to about 2s.
     """
-    result = _prepare_query("place", bbox, release, stac=stac)
+    result = _prepare_query(overture_type, bbox, release, stac=stac)
     if result is None:
         return iter(())
     dataset, filter_expr, _ = result
-    columns = [c for c in _PLACE_CATEGORY_COLUMNS if c in dataset.schema.names]
-    return dataset.to_batches(columns=columns, filter=filter_expr, use_threads=True)
+    present = [c for c in columns if c in dataset.schema.names]
+    return dataset.to_batches(columns=present, filter=filter_expr, use_threads=True)
 
 
 def record_batch_reader(
