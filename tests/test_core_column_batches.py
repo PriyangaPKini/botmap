@@ -4,9 +4,10 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import pytest
 
-from botmap.core import column_batches, count_rows
+from botmap.core import _prepare_query, column_batches, count_rows
 
 _RELEASE = "2026-08-19.0"
+_BBOX = (-71.16, 42.35, -71.06, 42.40)
 
 
 def _places(with_basic_category=True):
@@ -54,3 +55,31 @@ def test_reuses_the_dataset_the_query_already_opened(monkeypatch):
     list(column_batches("place", ("taxonomy",), release=_RELEASE))
     assert len(opened) == 1
 
+
+def _stac(monkeypatch, files):
+    """Make the STAC lookup return `files` (None means it failed); count the calls."""
+    calls = []
+
+    def lookup(*args):
+        calls.append(args)
+        return files
+
+    monkeypatch.setattr("botmap.core._get_files_from_stac", lookup)
+    return calls
+
+
+def test_successful_stac_lookup_is_cached(monkeypatch):
+    _serve(monkeypatch, _places())
+    calls = _stac(monkeypatch, ["bucket/part-0.parquet"])
+    _prepare_query("place", _BBOX, _RELEASE, stac=True)
+    _prepare_query("place", _BBOX, _RELEASE, stac=True)
+    assert len(calls) == 1
+
+
+def test_failed_stac_lookup_is_retried_not_cached(monkeypatch):
+    """A brief STAC outage must not pin the slow whole-partition scan for the process."""
+    _serve(monkeypatch, _places())
+    calls = _stac(monkeypatch, None)
+    assert _prepare_query("place", _BBOX, _RELEASE, stac=True) is not None
+    _prepare_query("place", _BBOX, _RELEASE, stac=True)
+    assert len(calls) == 2

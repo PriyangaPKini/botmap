@@ -269,26 +269,51 @@ def _scan_batches(dataset, filter_expr, columns, post_filters):
     return (b.select(columns) for b in filtered)
 
 
-@functools.lru_cache(maxsize=16)
+class _StacUnavailable(Exception):
+    """The STAC lookup failed, so its fallback must not be cached."""
+
+
 def _open_dataset(overture_type, bbox, release, connect_timeout, request_timeout, stac):
     """Find the files for a query and open them as a dataset.
 
-    Returns None if STAC reports no files intersect `bbox`. Cached because
-    this costs about 3s of STAC and S3 round trips, and a zero-result hint
-    repeats it for the same area. A published release never changes, so a
-    cached dataset cannot go stale.
+    Returns None if STAC reports no files intersect `bbox`. If the STAC lookup
+    fails, falls back to the whole partition without caching that result, so
+    the next query retries STAC instead of keeping the slow path.
     """
-    intersecting_files = None
-    if bbox and stac:
-        intersecting_files = _get_files_from_stac(
-            type_theme_map[overture_type], overture_type, BBox(*bbox), release
-        )
-        if intersecting_files is not None and len(intersecting_files) == 0:
-            return None
+    try:
+        return _open_dataset_cached(
+            overture_type, bbox, release, connect_timeout, request_timeout, stac)
+    except _StacUnavailable:
+        return _s3_dataset(_dataset_path(overture_type, release),
+                           connect_timeout, request_timeout)
 
+
+@functools.lru_cache(maxsize=16)
+def _open_dataset_cached(overture_type, bbox, release, connect_timeout, request_timeout, stac):
+    """Cached body of `_open_dataset`.
+
+    Cached because this costs about 3s of STAC and S3 round trips, and a
+    zero-result hint repeats it for the same area. A published release never
+    changes, so a successful lookup cannot go stale. A failed one raises, and
+    `lru_cache` does not cache a call that raises.
+    """
+    if not (bbox and stac):
+        return _s3_dataset(_dataset_path(overture_type, release),
+                           connect_timeout, request_timeout)
+    intersecting_files = _get_files_from_stac(
+        type_theme_map[overture_type], overture_type, BBox(*bbox), release
+    )
+    if intersecting_files is None:
+        raise _StacUnavailable()
+    if len(intersecting_files) == 0:
+        return None
+    return _s3_dataset(intersecting_files, connect_timeout, request_timeout)
+
+
+def _s3_dataset(source, connect_timeout, request_timeout) -> ds.Dataset:
+    """Open `source` (a partition path or a list of files) on Overture's S3 bucket."""
     return ds.dataset(
-        intersecting_files if intersecting_files is not None
-        else _dataset_path(overture_type, release),
+        source,
         filesystem=fs.S3FileSystem(
             anonymous=True,
             region="us-west-2",
