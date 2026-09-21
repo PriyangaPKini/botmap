@@ -2,7 +2,7 @@
 
 import pyarrow as pa
 
-from botmap.category_taxonomy import category_pairs, closest_values
+from botmap.category_taxonomy import category_pairs, closest_values, zero_result_hint
 
 
 def _batch(primaries, basics=None):
@@ -49,3 +49,45 @@ class TestCategoryPairs:
     def test_collects_across_batches(self):
         batches = [_batch(["cafe"], ["cafe"]), _batch(["bar"], ["bar"])]
         assert category_pairs(batches) == {("cafe", "cafe"), ("bar", "bar")}
+
+
+_PAIRS = {
+    ("veterinarian", "animal_or_pet_service"),
+    ("pet_groomer", "animal_or_pet_service"),
+    ("restaurant", "restaurant"),
+    ("cafe", "cafe"),
+}
+
+
+class TestZeroResultHint:
+    def test_detailed_value_on_basic_category_names_the_right_field(self):
+        hint = zero_result_hint("basic_category", "veterinarian", _PAIRS)
+        assert "'veterinarian' is a taxonomy.primary value, not a basic_category" in hint
+        assert "--where taxonomy.primary=veterinarian" in hint
+
+    def test_wrong_field_hint_names_the_basic_category_it_sits_under(self):
+        hint = zero_result_hint("basic_category", "veterinarian", _PAIRS)
+        assert "--basic-category animal_or_pet_service" in hint
+
+    def test_broad_value_on_taxonomy_primary_names_the_right_field(self):
+        hint = zero_result_hint("taxonomy.primary", "animal_or_pet_service", _PAIRS)
+        assert "is a basic_category value, not a taxonomy.primary" in hint
+        assert "--basic-category animal_or_pet_service" in hint
+
+    def test_value_present_in_its_own_field_gives_no_hint(self):
+        """Another filter caused the zero; claiming the value is absent would be false."""
+        assert zero_result_hint("taxonomy.primary", "restaurant", _PAIRS) is None
+
+    def test_near_miss_suggests_close_values(self):
+        hint = zero_result_hint("taxonomy.primary", "restaurants", _PAIRS)
+        assert "Did you mean: restaurant?" in hint
+
+    def test_near_miss_on_basic_category_points_at_its_own_listing(self):
+        hint = zero_result_hint("basic_category", "animal_service", _PAIRS)
+        assert "animal_or_pet_service" in hint
+        assert "botmap basic-categories" in hint
+
+    def test_no_close_value_says_it_is_absent(self):
+        hint = zero_result_hint("taxonomy.primary", "zeppelin_port", _PAIRS)
+        assert "is not present in this bbox" in hint
+        assert "botmap categories" in hint
