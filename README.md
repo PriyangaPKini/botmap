@@ -270,8 +270,8 @@ botmap --json where "Brooklyn"
 # > {"name": "Brooklyn", "subtype": "locality", "region": "US-NY", "population": 2736074, ...}
 
 # 2. Discover the right category name
-botmap --json categories -t place --in "Brooklyn" --top 50 | jq -r '.[].value' | grep -i coffee
-# > coffee_shop
+botmap categories -t place --in "Brooklyn" --find coffee --top 5
+# > coffee_shop, coffee_roastery, ...
 
 # 3. Count
 botmap --json count -t place --in "Brooklyn" --where taxonomy.primary=coffee_shop
@@ -370,7 +370,12 @@ Enumerate `taxonomy.primary` values (with counts) for a place-scoped region.
 ```bash
 botmap categories -t place --in "Brooklyn" --top 20
 botmap --json categories -t place --in "Manhattan" --top 50 | jq -r '.[] | "\(.count)\t\(.value)"'
+botmap categories -t place --in "Cambridge, MA" --find vet   # veterinarian, veterans_organization
 ```
+
+`--find TEXT` keeps the listed values that contain `TEXT`, ignoring case. It is
+a substring match, not a search by meaning: `animal` does not find
+`veterinarian`. Category values are singular (`restaurant`, not `restaurants`).
 
 #### `basic-categories -t place`
 
@@ -379,6 +384,7 @@ Enumerate `basic_category` values (with counts) for a place-scoped region.
 ```bash
 botmap basic-categories -t place --in "Brooklyn" --top 20
 botmap --json basic-categories -t place --in "Manhattan" --top 20
+botmap basic-categories -t place --in "Brooklyn" --find pet
 ```
 
 #### `capabilities`
@@ -415,6 +421,12 @@ botmap places --bbox=-122.295,37.778,-122.265,37.800 --category coffee_shop
 # POIs by broad category
 botmap places --in "Cambridge, MA" --basic-category pharmacy_and_drug_store
 
+# A category and everything under it (chinese_restaurant, thai_restaurant, ...)
+botmap places --in "Cambridge, MA" --where 'taxonomy.hierarchy contains asian_restaurant'
+
+# Places whose name contains a word (case-insensitive substring, not a regex)
+botmap places --in "Cambridge, MA" --where 'names.primary~pizza'
+
 # Buildings filtered by attribute
 botmap buildings --in "Manhattan" --where 'height>150' -f geojsonseq -o tall.jsonl
 botmap buildings --in "Boston, MA" --where 'num_floors>=10' --where 'height>30' -f geoparquet -o tall.parquet
@@ -432,12 +444,37 @@ botmap water --in "Minneapolis, MN" --class lake -f geojsonseq -o lakes.jsonl
 botmap landuse --in "Brooklyn, NY" --class residential -f geojsonseq -o zoning.jsonl
 ```
 
-`places` includes a zero-result hint: when `--category X` (or
-`--where taxonomy.primary=X`) returns 0 rows AND that value isn't
-present in the bbox, the CLI scans the bbox once for the live category
-list and emits a stderr suggestion of up to 3 near-matches drawn from
-what's actually there. So `--category ferry_terminal` in a bbox where
-only `ferry_boat_company` exists yields:
+`--where` takes `K OP V` with these operators: `=`, `!=`, `<`, `<=`, `>`,
+`>=`, `in`, `~` and `contains`. Repeat it to AND several filters.
+
+- `~` is a case-insensitive substring match on a text field, not a regex.
+- `contains` keeps rows whose list field holds one exact value. List fields
+  such as `taxonomy.hierarchy` accept only `contains`. Because it follows the
+  hierarchy, `taxonomy.hierarchy contains restaurant` finds `steakhouse`,
+  which `taxonomy.primary~restaurant` misses.
+- Single-quote any expression with `<`, `>` or spaces, or the shell will
+  split or redirect it.
+
+Places carry two category vocabularies: the detailed `taxonomy.primary`
+(`--category`) and the broader `basic_category` (`--basic-category`).
+
+`places`, `count`, `sample` and `at` include a zero-result hint. When a place
+query filtering `taxonomy.primary` or `basic_category` returns 0 rows, the CLI
+scans the area's categories once and writes a suggestion to **stderr**. stdout,
+including `--json` output, is unchanged. The hint catches two mistakes:
+
+A value from the other vocabulary:
+
+```
+$ botmap count -t place --in "Cambridge, MA" --where basic_category=veterinarian
+0
+[botmap] 0 rows. 'veterinarian' is a taxonomy.primary value, not a
+basic_category. Try --where taxonomy.primary=veterinarian, or
+--basic-category animal_or_pet_service.
+```
+
+A value that isn't there. `--category ferry_terminal` in a bbox where only
+`ferry_boat_company` exists yields:
 
 ```
 [botmap] 0 rows. No place has taxonomy.primary='ferry_terminal' in
@@ -445,8 +482,9 @@ this bbox. Did you mean: ferry_boat_company? Run `botmap categories
 -t place --bbox …` to see the full list.
 ```
 
-This means agents typically don't need to round-trip through `categories`
-themselves; the hint surfaces the right value automatically.
+If the value does exist in the area, another filter caused the zero, and
+there is no hint. The hint scan makes a zero-row category query a few seconds
+slower than a normal one.
 
 #### `at LAT,LON`
 
