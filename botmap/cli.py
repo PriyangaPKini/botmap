@@ -318,6 +318,35 @@ TYPE_TO_VERB = {
 }
 
 
+# `--category` is sugar on `places`, which is fixed to one feature type. The
+# commands below take `-t TYPE`, so the flag has no meaning there. Claim it
+# anyway to name the equivalent filter, rather than letting Click emit a bare
+# "no such option".
+_WHERE_FIELD_BY_FLAG = {"category": "taxonomy.primary",
+                        "basic_category": "basic_category"}
+
+
+def _name_the_where_filter(ctx, param, value):
+    """Reject a category flag by naming the `--where` filter that replaces it."""
+    if value is None:
+        return None
+    flag = param.name.replace("_", "-")
+    field = _WHERE_FIELD_BY_FLAG[param.name]
+    raise click.UsageError(
+        f"`{ctx.info_name}` has no --{flag} (that's a `places` flag). Use:\n"
+        f"  --where {field}={value}"
+    )
+
+
+def rejects_category_flags(f):
+    """Declare the `places`-only category flags so this command can reject them."""
+    for flag in ("basic-category", "category"):
+        f = click.option(f"--{flag}", flag.replace("-", "_"), required=False,
+                         type=str, hidden=True, expose_value=False,
+                         callback=_name_the_where_filter)(f)
+    return f
+
+
 def _suggest_verb_command(
     verb: str, in_place, bbox, where_exprs, output_format, output
 ) -> str:
@@ -495,6 +524,7 @@ def cli(ctx, json_output):
 )
 @click.option("--connect_timeout", required=False, type=int)
 @click.option("--request_timeout", required=False, type=int)
+@rejects_category_flags
 def download(
     bbox, in_place, where_exprs, output_format, output, type_, release,
     connect_timeout, request_timeout, stac,
@@ -784,6 +814,7 @@ def boundary(ctx, query):
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
+@rejects_category_flags
 def count(ctx, type_, bbox, in_place, where_exprs, release):
     """Count features for a query without downloading them."""
     if bbox is not None and in_place is not None:
@@ -829,6 +860,7 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
 @click.option("-o", "--output", required=False, type=click.Path())
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
+@rejects_category_flags
 def sample(type_, bbox, in_place, where_exprs, n, output_format, output, release):
     """Emit the first N features matching the query."""
     if bbox is not None and in_place is not None:
@@ -1523,6 +1555,7 @@ def addresses(in_place, bbox, street, number, postcode, where_exprs, limit,
 @click.option("--release", default=None, callback=validate_release,
               required=False)
 @click.option("--json", "json_no_op", is_flag=True, default=False, hidden=True)
+@rejects_category_flags
 def at(latlon, type_, n, radius, where_exprs, output_format, output, release, json_no_op):
     """Nearest-neighbor lookup. LATLON is 'LAT,LON' (lat first, geographic)."""
     lat, lon = _parse_latlon(latlon)
