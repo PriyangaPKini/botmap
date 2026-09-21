@@ -159,20 +159,13 @@ def test_places_zero_results_emits_category_suggestion(monkeypatch):
     """When taxonomy.primary=X returns 0 rows, the CLI suggests near matches."""
     _setup(monkeypatch)
 
-    # First reader (the filtered query) returns 0 rows.
-    # Second reader (the suggestion enumeration) returns a known category list.
-    readers = [
-        _DummyReader(),  # filtered query — copy() will see 0 rows
-        _FakeReaderWithCategories([
-            "ferry_terminal", "ferry_service", "ferry_boat_company",
-            "coffee_shop", "restaurant", "hospital",
-        ]),
-    ]
-
-    def fake_reader(*a, **k):
-        return readers.pop(0)
-
-    monkeypatch.setattr("botmap.cli.record_batch_reader", fake_reader)
+    monkeypatch.setattr("botmap.cli.record_batch_reader", lambda *a, **k: _DummyReader())
+    categories = _FakeReaderWithCategories([
+        "ferry_terminal", "ferry_service", "ferry_boat_company",
+        "coffee_shop", "restaurant", "hospital",
+    ])
+    monkeypatch.setattr("botmap.cli.place_category_batches",
+                        lambda *a, **k: [categories.read_next_batch()])
     # copy() returns rows_written; force 0 to trigger the hint.
     monkeypatch.setattr("botmap.cli.copy", lambda r, w: 0)
 

@@ -25,6 +25,7 @@ from .core import (
     get_all_overture_types,
     get_available_releases,
     get_latest_release,
+    place_category_batches,
     record_batch_reader,
     record_batch_reader_from_gers,
     type_theme_map,
@@ -33,7 +34,7 @@ from .models import Backend, BBox, PipelineState
 from .releases import list_releases, release_exists
 from .state import get_state_path, load_state, save_state
 from .writers import copy, get_writer
-from .category_taxonomy import category_pairs, closest_values
+from .category_taxonomy import category_pairs, zero_result_hint
 from .filters import parse_where_expr, ParsedFilter
 from .geocoding import resolve
 from .cache import cache_info, clear_cache, build_index, index_path
@@ -95,27 +96,40 @@ def _describe_division(d) -> str:
     return f"{d.name} ({d.subtype}, {qual}, {pop})"
 
 
-def _suggest_categories(type_: str, bbox, release, target: str, n: int = 3):
-    """Scan `bbox` for `taxonomy.primary` values and return up to `n`
-    closest matches to `target`. Used to power 0-result hints — only call
-    on the failure path, since this issues a second scan of the bbox.
+# Fields whose zero-row result gets a category hint, and the operators that name one value.
+_CATEGORY_FIELDS = ("taxonomy.primary", "basic_category")
+_CATEGORY_OPERATORS = ("=", "in")
+
+
+def _emit_zero_result_hint(type_, bbox, release, where_filters) -> None:
+    """After a zero-row place query, explain a category filter's likely mistake on stderr.
+
+    Only call on the zero-row path: it scans the area's categories again.
     """
-    reader = record_batch_reader(type_, bbox, release, None, None, True)
-    if reader is None:
-        return []
-    primaries = {p for p, _ in category_pairs(_reader_batches(reader)) if p is not None}
-    return closest_values(target, primaries, n)
+    target = _category_filter_target(type_, where_filters)
+    if target is None:
+        return
+    field, value = target
+    try:
+        pairs = category_pairs(place_category_batches(bbox, release))
+    except OSError:
+        return  # The hint is a courtesy; a failed scan must not fail the query.
+    hint = zero_result_hint(field, value, pairs)
+    if hint:
+        click.secho(hint, fg="yellow", err=True)
 
 
-def _reader_batches(reader):
-    """Yield the non-empty batches of `reader` until it is exhausted."""
-    while True:
-        try:
-            batch = reader.read_next_batch()
-        except StopIteration:
-            return
-        if batch.num_rows:
-            yield batch
+def _category_filter_target(type_, where_filters):
+    """Return the (field, value) of the first place category filter, or None."""
+    if type_ != "place":
+        return None
+    for f in where_filters or []:
+        if f.key not in _CATEGORY_FIELDS or f.op not in _CATEGORY_OPERATORS:
+            continue
+        values = f.value if f.op == "in" else [f.value]
+        if values:
+            return f.key, str(values[0])
+    return None
 
 
 def _no_match_help(query: str) -> str:
@@ -813,6 +827,8 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
         })
     else:
         click.echo(f"{n:,}")
+    if n == 0:
+        _emit_zero_result_hint(type_, bbox, release, where_filters)
 
 
 @cli.command()
@@ -859,7 +875,9 @@ def sample(type_, bbox, in_place, where_exprs, n, output_format, output, release
     limited = _limit_reader(reader, n)
 
     with get_writer(output_format, output_file, schema=limited.schema) as writer:
-        copy(limited, writer)
+        rows_written = copy(limited, writer)
+    if rows_written == 0:
+        _emit_zero_result_hint(type_, bbox, release, where_filters)
 
 
 @cli.command()
@@ -1224,35 +1242,7 @@ def places(
         rows_written = copy(reader, writer)
 
     if rows_written == 0:
-        # Zero-result hint: was a taxonomy.primary filter the cause?
-        # If so, suggest near-match values from the bbox's actual category list.
-        cat_filters = [
-            f for f in filters
-            if f.key == "taxonomy.primary" and f.op in ("=", "in")
-        ]
-        if cat_filters:
-            target = cat_filters[0].value
-            if isinstance(target, list):
-                target = target[0] if target else None
-            if target:
-                hits = _suggest_categories("place", bbox, release, str(target))
-                if hits:
-                    click.secho(
-                        f"[botmap] 0 rows. No place has "
-                        f"taxonomy.primary={target!r} in this bbox. "
-                        f"Did you mean: {', '.join(hits)}? "
-                        f"Run `botmap categories -t place --bbox …` "
-                        f"to see the full list.",
-                        fg="yellow", err=True,
-                    )
-                else:
-                    click.secho(
-                        f"[botmap] 0 rows. taxonomy.primary={target!r} "
-                        f"is not present in this bbox. Run "
-                        f"`botmap categories -t place --bbox …` "
-                        f"to see what's available.",
-                        fg="yellow", err=True,
-                    )
+        _emit_zero_result_hint("place", bbox, release, filters)
 
 
 @cli.command()
@@ -1601,6 +1591,7 @@ def at(latlon, type_, n, radius, where_exprs, output_format, output, release, js
 
     # Build a fresh reader over the kept rows and stream through the writer.
     if not rows:
+        _emit_zero_result_hint(type_, bbox, release, where_filters)
         return
 
     sample_batch_props = [r[1] for r in rows]
