@@ -33,6 +33,7 @@ from .models import Backend, BBox, PipelineState
 from .releases import list_releases, release_exists
 from .state import get_state_path, load_state, save_state
 from .writers import copy, get_writer
+from .category_taxonomy import category_pairs, closest_values
 from .filters import parse_where_expr, ParsedFilter
 from .geocoding import resolve
 from .cache import cache_info, clear_cache, build_index, index_path
@@ -108,55 +109,23 @@ def _suggest_categories(type_: str, bbox, release, target: str, n: int = 3):
     """Scan `bbox` for `taxonomy.primary` values and return up to `n`
     closest matches to `target`. Used to power 0-result hints — only call
     on the failure path, since this issues a second scan of the bbox.
-
-    Ranking is token-aware: `ferry_terminal` should match `ferry_service`
-    via the shared "ferry" token, not `cafeteria` via character overlap.
     """
     reader = record_batch_reader(type_, bbox, release, None, None, True)
     if reader is None:
         return []
-    seen: set[str] = set()
+    primaries = {p for p, _ in category_pairs(_reader_batches(reader)) if p is not None}
+    return closest_values(target, primaries, n)
+
+
+def _reader_batches(reader):
+    """Yield the non-empty batches of `reader` until it is exhausted."""
     while True:
         try:
             batch = reader.read_next_batch()
         except StopIteration:
-            break
-        if batch.num_rows == 0:
-            continue
-        cat_col = batch.column("taxonomy")
-        primary = pc.struct_field(cat_col, "primary").to_pylist()
-        for v in primary:
-            if v is not None:
-                seen.add(v)
-    if not seen:
-        return []
-
-    import difflib
-    target_lower = target.lower()
-    target_tokens = set(target_lower.replace("_", " ").split())
-    matcher = difflib.SequenceMatcher(autojunk=False)
-    matcher.set_seq1(target_lower)
-
-    # Inclusion rules (any one passes):
-    #   - token overlap >= 1  → "ferry_terminal" ~ "ferry_service"
-    #   - substring          → "cafe" ~ "cafeteria"
-    #   - ratio >= 0.75      → typo correction ("coffe_shop" ~ "coffee_shop")
-    # Anything weaker is noise (e.g. cafeteria ~ ferry_terminal at 0.609).
-    scored = []
-    for v in seen:
-        v_lower = v.lower()
-        matcher.set_seq2(v_lower)
-        ratio = matcher.ratio()
-        v_tokens = set(v_lower.replace("_", " ").split())
-        token_overlap = len(target_tokens & v_tokens)
-        substring_hit = int(target_lower in v_lower or v_lower in target_lower)
-        if token_overlap or substring_hit or ratio >= 0.75:
-            score = ratio + 0.2 * token_overlap + 0.15 * substring_hit
-            scored.append((score, v))
-    if not scored:
-        return []
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [v for _, v in scored[:n]]
+            return
+        if batch.num_rows:
+            yield batch
 
 
 def _no_match_help(query: str) -> str:
