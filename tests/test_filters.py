@@ -235,3 +235,57 @@ class TestMissingOperatorIsNotMistakenForAnUnknownOne:
         with pytest.raises(ValueError) as exc:
             parse_where_expr("name LIKE cafe")
         assert "Unsupported operator 'LIKE'" in str(exc.value)
+
+
+def _list_schema():
+    return pa.schema([
+        ("taxonomy", pa.struct([
+            ("primary", pa.string()),
+            ("hierarchy", pa.list_(pa.string())),
+        ])),
+    ])
+
+
+class TestContainsParsing:
+    def test_contains_parses_to_scalar_value(self):
+        assert parse_where_expr("taxonomy.hierarchy contains restaurant") == ParsedFilter(
+            key="taxonomy.hierarchy", op="contains", value="restaurant")
+
+    def test_contains_rejects_a_list_value(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("taxonomy.hierarchy contains [restaurant,cafe]")
+        assert "contains" in str(exc.value)
+        assert "single value" in str(exc.value)
+
+    def test_contains_is_listed_as_supported(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name like cafe")
+        assert "contains" in str(exc.value)
+
+
+class TestListFieldValidation:
+    def test_contains_on_list_field_is_allowed(self):
+        ParsedFilter("taxonomy.hierarchy", "contains", "restaurant").validate_against_schema(
+            _list_schema())
+
+    def test_contains_on_scalar_field_is_rejected(self):
+        with pytest.raises(ValueError) as exc:
+            ParsedFilter("taxonomy.primary", "contains", "x").validate_against_schema(
+                _list_schema())
+        msg = str(exc.value)
+        assert "taxonomy.primary" in msg
+        assert "not a list" in msg
+
+    def test_equals_on_list_field_suggests_contains(self):
+        with pytest.raises(ValueError) as exc:
+            ParsedFilter("taxonomy.hierarchy", "=", "restaurant").validate_against_schema(
+                _list_schema())
+        msg = str(exc.value)
+        assert "taxonomy.hierarchy" in msg
+        assert "taxonomy.hierarchy contains restaurant" in msg
+
+    def test_tilde_on_list_field_suggests_contains(self):
+        with pytest.raises(ValueError) as exc:
+            ParsedFilter("taxonomy.hierarchy", "~", "rest").validate_against_schema(
+                _list_schema())
+        assert "contains" in str(exc.value)
