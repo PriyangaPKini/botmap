@@ -81,7 +81,7 @@ def test_at_passes_where_filters(monkeypatch, tmp_path):
     with runner.isolated_filesystem():
         result = runner.invoke(cli, [
             "at", "42.360,-71.0617", "-t", "place", "-n", "5",
-            "--where", "categories.primary=coffee_shop",
+            "--where", "taxonomy.primary=coffee_shop",
             "-f", "geojsonseq", "-o", "out.jsonl",
         ])
         assert result.exit_code == 0, result.output
@@ -89,7 +89,7 @@ def test_at_passes_where_filters(monkeypatch, tmp_path):
         assert captured["where_filters"] is not None
         assert len(captured["where_filters"]) == 1
         f = captured["where_filters"][0]
-        assert f.key == "categories.primary"
+        assert f.key == "taxonomy.primary"
         assert f.op == "="
         assert f.value == "coffee_shop"
 

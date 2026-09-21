@@ -329,8 +329,10 @@ def _suggest_verb_command(
         parts.append(f"--bbox {bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}")
     leftover = []
     for expr in (where_exprs or []):
-        if expr.startswith("categories.primary="):
+        if expr.startswith(("taxonomy.primary=", "categories.primary=")):
             parts.append(f"--category {expr.split('=', 1)[1]}")
+        elif expr.startswith("basic_category="):
+            parts.append(f"--basic-category {expr.split('=', 1)[1]}")
         elif expr.startswith("class="):
             parts.append(f"--class {expr.split('=', 1)[1]}")
         else:
@@ -1504,7 +1506,7 @@ def addresses(in_place, bbox, street, number, postcode, where_exprs, limit,
               help="Radius in meters; defaults per type.")
 @click.option("--where", "where_exprs", multiple=True,
               help="Attribute filter K OP V (repeatable). "
-                   "Example: --where categories.primary=coffee_shop")
+                   "Example: --where taxonomy.primary=coffee_shop")
 @click.option("-f", "output_format",
               type=click.Choice(["geojson", "geojsonseq", "geoparquet"]),
               default="geojsonseq", show_default=True)
