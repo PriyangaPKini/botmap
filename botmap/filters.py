@@ -94,22 +94,40 @@ class ParsedFilter:
     def _validate_operator_against_type(self, field_type: pa.DataType) -> None:
         """Reject an operator the resolved field type cannot support."""
         if self.op == "contains":
-            if not _is_list_type(field_type):
-                raise ValueError(
-                    f"Operator 'contains' needs a list field, but {self.key!r} is "
-                    f"{field_type}, not a list. Use '=' or '~' instead."
-                )
+            self._validate_contains(field_type)
             return
         if _is_list_type(field_type):
+            example = self.value[0] if self.op == "in" and self.value else self.value
             raise ValueError(
                 f"Field {self.key!r} is a list ({field_type}), so '{self.op}' cannot "
-                f"compare it. Use --where '{self.key} contains {self.value}' to keep "
-                f"rows whose list holds that exact value."
+                f"compare it. Use --where '{self.key} contains {example}' to keep "
+                f"rows whose list holds that value. `contains` takes one value."
             )
         if self.op in _STRING_ONLY_OPERATORS and not pa.types.is_string(field_type):
             raise ValueError(
                 f"Operator '{self.op}' needs a string field, but {self.key!r} is "
                 f"{field_type}. Use a comparison such as '=' instead."
+            )
+
+    def _validate_contains(self, field_type: pa.DataType) -> None:
+        """Reject `contains` unless the field is a list of plain values the value fits."""
+        if not _is_list_type(field_type):
+            raise ValueError(
+                f"Operator 'contains' needs a list field, but {self.key!r} is "
+                f"{field_type}, not a list. Use '=' or '~' instead."
+            )
+        element_type = field_type.value_type
+        if pa.types.is_nested(element_type):
+            raise ValueError(
+                f"Operator 'contains' needs a list of plain values, but {self.key!r} "
+                f"is a list of records ({element_type})."
+            )
+        try:
+            _as_element(self.value, element_type)
+        except (pa.ArrowInvalid, pa.ArrowNotImplementedError):
+            raise ValueError(
+                f"{self.value!r} cannot be compared with the items of {self.key!r}, "
+                f"which are {element_type}."
             )
 
 
@@ -121,10 +139,16 @@ def list_contains_mask(column: pa.Array, value: Any) -> pa.BooleanArray:
     which `list_flatten` does not. So we flatten, find the matching elements,
     and map each one back to the row it came from.
     """
+    element = _as_element(value, column.type.value_type)
     matching_rows = pc.filter(pc.list_parent_indices(column),
-                              pc.equal(pc.list_flatten(column), value))
+                              pc.equal(pc.list_flatten(column), element))
     row_numbers = pa.array(range(len(column)), type=pa.int64())
     return pc.is_in(row_numbers, value_set=matching_rows)
+
+
+def _as_element(value: Any, element_type: pa.DataType) -> pa.Scalar:
+    """Convert a `contains` value to the list's item type, e.g. "5" for an int64 list."""
+    return pa.scalar(value).cast(element_type)
 
 
 def _is_list_type(field_type: pa.DataType) -> bool:
@@ -161,7 +185,11 @@ def _coerce_scalar(raw: str) -> Union[str, int, float, bool]:
         return float(s)
     except ValueError:
         pass
-    # strip optional surrounding quotes
+    return _strip_quotes(s)
+
+
+def _strip_quotes(s: str) -> str:
+    """Drop one pair of matching surrounding quotes, if present."""
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
         return s[1:-1]
     return s
@@ -227,11 +255,13 @@ def parse_where_expr(expr: str) -> ParsedFilter:
 
     if op == "in":
         value = _parse_list_value(value_raw)
-    elif op == "contains" and value_raw.startswith("["):
-        raise ValueError(
-            f"`contains` takes a single value, not a list: {expr!r}. "
-            f"Use --where 'KEY contains VALUE'."
-        )
+    elif op == "contains":
+        if value_raw.startswith("["):
+            raise ValueError(
+                f"`contains` takes a single value, not a list: {expr!r}. "
+                f"Use --where 'KEY contains VALUE'."
+            )
+        value = _strip_quotes(value_raw)
     else:
         value = _coerce_scalar(value_raw)
 

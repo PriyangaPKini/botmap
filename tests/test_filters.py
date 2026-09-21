@@ -289,3 +289,29 @@ class TestListFieldValidation:
             ParsedFilter("taxonomy.hierarchy", "~", "rest").validate_against_schema(
                 _list_schema())
         assert "contains" in str(exc.value)
+
+
+class TestContainsElementType:
+    def test_list_of_records_is_rejected(self):
+        schema = pa.schema([("addresses", pa.list_(pa.struct([("country", pa.string())])))])
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("addresses contains US").validate_against_schema(schema)
+        msg = str(exc.value)
+        assert "addresses" in msg
+        assert "plain values" in msg
+
+    def test_value_that_looks_numeric_stays_text(self):
+        assert parse_where_expr("taxonomy.hierarchy contains 5").value == "5"
+
+    def test_value_that_cannot_be_the_element_type_is_rejected(self):
+        schema = pa.schema([("ids", pa.list_(pa.int64()))])
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("ids contains abc").validate_against_schema(schema)
+        assert "abc" in str(exc.value)
+
+    def test_in_on_a_list_field_does_not_suggest_a_list_value(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("taxonomy.hierarchy in [a,b]").validate_against_schema(_list_schema())
+        msg = str(exc.value)
+        assert "contains [" not in msg
+        assert "one value" in msg

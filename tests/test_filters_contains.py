@@ -37,3 +37,12 @@ class TestListContainsMask:
         col = pa.array([["restaurant"], ["cafe"], ["restaurant"]],
                        type=pa.list_(pa.string())).slice(1)
         assert list_contains_mask(col, "restaurant").to_pylist() == [False, True]
+
+
+class TestValueMatchesElementType:
+    def test_text_value_matches_a_numeric_list(self):
+        col = pa.array([[1, 5], [2]], type=pa.list_(pa.int64()))
+        assert list_contains_mask(col, "5").to_pylist() == [True, False]
+
+    def test_numeric_looking_text_matches_a_text_list(self):
+        assert _mask([["5"], ["6"]], "5") == [True, False]
