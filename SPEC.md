@@ -320,6 +320,21 @@ post-scan filters separately. `record_batch_reader` applies post-scan filters
 to each batch, and `count_rows` streams and sums instead of calling
 `dataset.count_rows(filter=)` when any exist.
 
+**Zero-result hint.** `places`, `count`, `sample` and `at` call one shared
+hint (`category_taxonomy.zero_result_hint`) when a `place` query filtering
+`taxonomy.primary` or `basic_category` with `=` or `in` returns zero rows. It
+scans the area's two category columns once, reusing the dataset the query
+already opened, and writes to stderr only:
+
+- A value from the other vocabulary: name the right field, and for a
+  `taxonomy.primary` value, the `basic_category` it sits under.
+- A value present in its own vocabulary: no hint, since another filter
+  caused the zero.
+- Otherwise: up to three near matches, or a pointer to the listing command.
+
+If the hint scan fails with an I/O error, the hint is skipped and the
+command's result and exit code are unchanged.
+
 ---
 
 ## 6. Writer Specification

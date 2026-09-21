@@ -63,9 +63,13 @@ to `download`:
    approximate `--bbox xmin,ymin,xmax,ymax` instead.
 3. **Count before pulling.** `botmap --json count -t TYPE --in "…"`.
 4. **Too many results?** Add `--where` / `--category` / `--class` filters, or
-   narrow the area with a tighter `--bbox`. **Too few (or zero)?** Widen the
-   `--bbox`, drop a filter, or search the values with `categories --find`
-   (Recipe 9). Category values are singular: `restaurant`, not `restaurants`.
+   narrow the area with a tighter `--bbox`. **Too few (or zero)?** Read the
+   yellow `[botmap]` hint on **stderr** first. For a place category filter it
+   names the right field or the closest real value. Then widen the `--bbox`,
+   drop a filter, or search the values with `categories --find` (Recipe 9).
+   Category values are singular: `restaurant`, not `restaurants`. A zero
+   count on a category filter takes a few seconds longer than a normal one,
+   because it scans the area for that hint.
 5. **Preview, then pull.** `sample -n 5` (or any verb with `-n`) to confirm
    shape, then run the verb to get the full set.
 

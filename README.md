@@ -458,12 +458,23 @@ botmap landuse --in "Brooklyn, NY" --class residential -f geojsonseq -o zoning.j
 Places carry two category vocabularies: the detailed `taxonomy.primary`
 (`--category`) and the broader `basic_category` (`--basic-category`).
 
-`places` includes a zero-result hint: when `--category X` (or
-`--where taxonomy.primary=X`) returns 0 rows AND that value isn't
-present in the bbox, the CLI scans the bbox once for the live category
-list and emits a stderr suggestion of up to 3 near-matches drawn from
-what's actually there. So `--category ferry_terminal` in a bbox where
-only `ferry_boat_company` exists yields:
+`places`, `count`, `sample` and `at` include a zero-result hint. When a place
+query filtering `taxonomy.primary` or `basic_category` returns 0 rows, the CLI
+scans the area's categories once and writes a suggestion to **stderr**. stdout,
+including `--json` output, is unchanged. The hint catches two mistakes:
+
+A value from the other vocabulary:
+
+```
+$ botmap count -t place --in "Cambridge, MA" --where basic_category=veterinarian
+0
+[botmap] 0 rows. 'veterinarian' is a taxonomy.primary value, not a
+basic_category. Try --where taxonomy.primary=veterinarian, or
+--basic-category animal_or_pet_service.
+```
+
+A value that isn't there. `--category ferry_terminal` in a bbox where only
+`ferry_boat_company` exists yields:
 
 ```
 [botmap] 0 rows. No place has taxonomy.primary='ferry_terminal' in
@@ -471,8 +482,9 @@ this bbox. Did you mean: ferry_boat_company? Run `botmap categories
 -t place --bbox …` to see the full list.
 ```
 
-This means agents typically don't need to round-trip through `categories`
-themselves; the hint surfaces the right value automatically.
+If the value does exist in the area, another filter caused the zero, and
+there is no hint. The hint scan makes a zero-row category query a few seconds
+slower than a normal one.
 
 #### `at LAT,LON`
 
