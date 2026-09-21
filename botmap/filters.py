@@ -10,7 +10,7 @@ import pyarrow.compute as pc
 
 
 # Operators ordered longest-first so the splitter doesn't mistake `>=` for `>`.
-_OPERATORS = ["<=", ">=", "!=", " in ", "=", "<", ">", "~"]
+_OPERATORS = [" contains ", "<=", ">=", "!=", " in ", "=", "<", ">", "~"]
 
 # Operators that only make sense on a string field.
 _STRING_ONLY_OPERATORS = ("~",)
@@ -19,8 +19,9 @@ _STRING_ONLY_OPERATORS = ("~",)
 @dataclass(frozen=True)
 class ParsedFilter:
     key: str
-    # User-facing ops from --where: =, !=, <, <=, >, >=, in, ~
+    # User-facing ops from --where: =, !=, <, <=, >, >=, in, ~, contains
     #   ~ : case-insensitive substring match, also used by `addresses --street`
+    #   contains : list membership, the only operator a list field accepts
     op: str
     value: Any  # str | int | float | bool | list
 
@@ -82,11 +83,30 @@ class ParsedFilter:
 
     def _validate_operator_against_type(self, field_type: pa.DataType) -> None:
         """Reject an operator the resolved field type cannot support."""
+        if self.op == "contains":
+            if not _is_list_type(field_type):
+                raise ValueError(
+                    f"Operator 'contains' needs a list field, but {self.key!r} is "
+                    f"{field_type}, not a list. Use '=' or '~' instead."
+                )
+            return
+        if _is_list_type(field_type):
+            raise ValueError(
+                f"Field {self.key!r} is a list ({field_type}), so '{self.op}' cannot "
+                f"compare it. Use --where '{self.key} contains {self.value}' to keep "
+                f"rows whose list holds that exact value."
+            )
         if self.op in _STRING_ONLY_OPERATORS and not pa.types.is_string(field_type):
             raise ValueError(
                 f"Operator '{self.op}' needs a string field, but {self.key!r} is "
                 f"{field_type}. Use a comparison such as '=' instead."
             )
+
+
+def _is_list_type(field_type: pa.DataType) -> bool:
+    return (pa.types.is_list(field_type)
+            or pa.types.is_large_list(field_type)
+            or pa.types.is_fixed_size_list(field_type))
 
 
 def _has_taxonomy_primary(schema: pa.Schema) -> bool:
@@ -183,6 +203,11 @@ def parse_where_expr(expr: str) -> ParsedFilter:
 
     if op == "in":
         value = _parse_list_value(value_raw)
+    elif op == "contains" and value_raw.startswith("["):
+        raise ValueError(
+            f"`contains` takes a single value, not a list: {expr!r}. "
+            f"Use --where 'KEY contains VALUE'."
+        )
     else:
         value = _coerce_scalar(value_raw)
 
