@@ -64,3 +64,50 @@ def closest_values(target: str, values: Iterable[str], n: int = 3) -> list[str]:
             scored.append((score, v))
     scored.sort(key=lambda x: x[0], reverse=True)
     return [v for _, v in scored[:n]]
+
+
+_PRIMARY = "taxonomy.primary"
+_BASIC = "basic_category"
+
+# The command that lists each vocabulary, for "see what's available" hints.
+_LISTING_COMMAND = {_PRIMARY: "categories", _BASIC: "basic-categories"}
+
+
+def zero_result_hint(field: str, value: str, pairs: Set[CategoryPair]) -> Optional[str]:
+    """Explain why filtering `field` = `value` returned zero rows, or return None.
+
+    `field` is `taxonomy.primary` or `basic_category`, and `pairs` comes from
+    `category_pairs` over the same area. A value from the other vocabulary is
+    a certain mistake, so that hint comes first. A value present in its own
+    vocabulary means some other filter caused the zero, so there is no hint.
+    """
+    primaries = {p for p, _ in pairs if p is not None}
+    basics = {b for _, b in pairs if b is not None}
+    own, other = (primaries, basics) if field == _PRIMARY else (basics, primaries)
+    if value in own:
+        return None
+    if value in other:
+        return _wrong_field_hint(field, value, pairs)
+    return _near_match_hint(field, value, own)
+
+
+def _wrong_field_hint(field: str, value: str, pairs: Set[CategoryPair]) -> str:
+    if field == _BASIC:
+        parents = sorted({b for p, b in pairs if p == value and b is not None})
+        hint = (f"[botmap] 0 rows. {value!r} is a taxonomy.primary value, not a "
+                f"basic_category. Try --where taxonomy.primary={value}")
+        if parents:
+            hint += "".join(f", or --basic-category {b}" for b in parents)
+        return hint + "."
+    return (f"[botmap] 0 rows. {value!r} is a basic_category value, not a "
+            f"taxonomy.primary. Try --basic-category {value}.")
+
+
+def _near_match_hint(field: str, value: str, values: Set[str]) -> str:
+    listing = f"`botmap {_LISTING_COMMAND[field]} -t place --bbox …`"
+    hits = closest_values(value, values)
+    if hits:
+        return (f"[botmap] 0 rows. No place has {field}={value!r} in this bbox. "
+                f"Did you mean: {', '.join(hits)}? Run {listing} to see the full list.")
+    return (f"[botmap] 0 rows. {field}={value!r} is not present in this bbox. "
+            f"Run {listing} to see what's available.")
