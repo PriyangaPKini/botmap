@@ -204,6 +204,7 @@ def _get_files_from_stac(
 def _record_batch_reader_from_dataset(
     dataset: ds.Dataset,
     filter_expr=None,
+    columns=None,
 ) -> Optional[pa.RecordBatchReader]:
     """
     Create a RecordBatchReader from an S3 dataset with optional filtering.
@@ -214,6 +215,9 @@ def _record_batch_reader_from_dataset(
         Dataset to read from
     filter_expr: pyarrow expression, optional
         Filter to apply when reading the dataset
+    columns: list of str, optional
+        Project to these columns only. An enumeration command reads one
+        field out of ~28, so projecting avoids fetching the rest.
 
     Returns
     -------
@@ -221,6 +225,7 @@ def _record_batch_reader_from_dataset(
     """
     try:
         batches = dataset.to_batches(
+            columns=columns,
             filter=filter_expr,
             use_threads=True,
             batch_readahead=16,
@@ -230,8 +235,13 @@ def _record_batch_reader_from_dataset(
         # Filter out empty batches to avoid downstream issues
         non_empty_batches = (b for b in batches if b.num_rows > 0)
 
-        geoarrow_schema = geoarrow_schema_adapter(dataset.schema)
-        return pa.RecordBatchReader.from_batches(geoarrow_schema, non_empty_batches)
+        schema = dataset.schema
+        if columns is not None:
+            schema = pa.schema([schema.field(name) for name in columns])
+        # The adapter tags a `geometry` column; a projection need not have one.
+        if schema.get_field_index("geometry") >= 0:
+            schema = geoarrow_schema_adapter(schema)
+        return pa.RecordBatchReader.from_batches(schema, non_empty_batches)
 
     except Exception as e:
         print(f"Error reading dataset: {e}")
@@ -324,6 +334,7 @@ def record_batch_reader(
     request_timeout=None,
     stac=False,
     where_filters=None,
+    columns=None,
 ) -> Optional[pa.RecordBatchReader]:
     """Return a pyarrow RecordBatchReader for the desired bounding box and s3 path, or None on error."""
     result = _prepare_query(
@@ -333,7 +344,8 @@ def record_batch_reader(
     if result is None:
         return None
     dataset, filter_expr = result
-    return _record_batch_reader_from_dataset(dataset, filter_expr=filter_expr)
+    return _record_batch_reader_from_dataset(
+        dataset, filter_expr=filter_expr, columns=columns)
 
 
 def geodataframe(
