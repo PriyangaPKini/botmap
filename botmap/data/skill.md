@@ -186,8 +186,7 @@ A `taxonomy.primary` value is not necessarily a leaf. `asian_restaurant` has
 `chinese_restaurant`, `thai_restaurant` and others beneath it, so
 `--where taxonomy.primary=asian_restaurant` returns only places labelled
 `asian_restaurant` itself. `contains` matches the value at any depth of the
-hierarchy, so it returns the whole branch. In Cambridge, MA that is more than
-ten times as many places:
+hierarchy, so it returns the whole branch, often many times as many places:
 
 ```bash
 botmap --json count -t place --in "Cambridge, MA" \
