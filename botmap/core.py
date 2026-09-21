@@ -1,3 +1,4 @@
+import functools
 import io
 import json
 import re
@@ -11,6 +12,7 @@ import pyarrow.dataset as ds
 import pyarrow.fs as fs
 import pyarrow.parquet as pq
 
+from .filters import ParsedFilter, apply_post_filters, combine, post_filter_fields
 from .models import BBox
 
 STAC_CATALOG_URL = "https://stac.overturemaps.org/catalog.json"
@@ -192,18 +194,21 @@ def _get_files_from_stac(
             return s3_paths
         else:
             print(
-                f"No data found for release {release} in query bbox {bbox.as_tuple()}."
+                f"No data found for release {release} in query bbox {bbox.as_tuple()}.",
+                file=sys.stderr,
             )
             return []
 
     except Exception as e:
-        print(f"Error reading STAC index at {stac_url}: {e}")
+        print(f"Error reading STAC index at {stac_url}: {e}", file=sys.stderr)
         return None
 
 
 def _record_batch_reader_from_dataset(
     dataset: ds.Dataset,
     filter_expr=None,
+    columns=None,
+    post_filters=(),
 ) -> Optional[pa.RecordBatchReader]:
     """
     Create a RecordBatchReader from an S3 dataset with optional filtering.
@@ -214,28 +219,108 @@ def _record_batch_reader_from_dataset(
         Dataset to read from
     filter_expr: pyarrow expression, optional
         Filter to apply when reading the dataset
+    columns: list of str, optional
+        Project to these columns only. An enumeration command reads one
+        field out of ~28, so projecting avoids fetching the rest.
+    post_filters: list of ParsedFilter, optional
+        Filters the scan cannot push down, applied to each batch after it
+        is read. Fields they need are read and then dropped again.
 
     Returns
     -------
     RecordBatchReader with the feature data, or None if error occurs
     """
     try:
-        batches = dataset.to_batches(
-            filter=filter_expr,
-            use_threads=True,
-            batch_readahead=16,
-            fragment_readahead=4,
-        )
+        batches = _scan_batches(dataset, filter_expr, columns, post_filters)
 
         # Filter out empty batches to avoid downstream issues
         non_empty_batches = (b for b in batches if b.num_rows > 0)
 
-        geoarrow_schema = geoarrow_schema_adapter(dataset.schema)
-        return pa.RecordBatchReader.from_batches(geoarrow_schema, non_empty_batches)
+        schema = dataset.schema
+        if columns is not None:
+            schema = pa.schema([schema.field(name) for name in columns])
+        # The adapter tags a `geometry` column; a projection need not have one.
+        if schema.get_field_index("geometry") >= 0:
+            schema = geoarrow_schema_adapter(schema)
+        return pa.RecordBatchReader.from_batches(schema, non_empty_batches)
 
     except Exception as e:
-        print(f"Error reading dataset: {e}")
+        print(f"Error reading dataset: {e}", file=sys.stderr)
         return None
+
+
+def _scan_batches(dataset, filter_expr, columns, post_filters):
+    """Scan `dataset`, apply post-scan filters, and project to `columns`."""
+    scan_columns = columns
+    if columns is not None and post_filters:
+        scan_columns = list(dict.fromkeys(columns + post_filter_fields(post_filters)))
+    batches = dataset.to_batches(
+        columns=scan_columns,
+        filter=filter_expr,
+        use_threads=True,
+        batch_readahead=16,
+        fragment_readahead=4,
+    )
+    if not post_filters:
+        return batches
+    filtered = (apply_post_filters(b, post_filters) for b in batches)
+    if scan_columns == columns:
+        return filtered
+    return (b.select(columns) for b in filtered)
+
+
+class _StacUnavailable(Exception):
+    """The STAC lookup failed, so its fallback must not be cached."""
+
+
+def _open_dataset(overture_type, bbox, release, connect_timeout, request_timeout, stac):
+    """Find the files for a query and open them as a dataset.
+
+    Returns None if STAC reports no files intersect `bbox`. If the STAC lookup
+    fails, falls back to the whole partition without caching that result, so
+    the next query retries STAC instead of keeping the slow path.
+    """
+    try:
+        return _open_dataset_cached(
+            overture_type, bbox, release, connect_timeout, request_timeout, stac)
+    except _StacUnavailable:
+        return _s3_dataset(_dataset_path(overture_type, release),
+                           connect_timeout, request_timeout)
+
+
+@functools.lru_cache(maxsize=16)
+def _open_dataset_cached(overture_type, bbox, release, connect_timeout, request_timeout, stac):
+    """Cached body of `_open_dataset`.
+
+    Cached because this costs about 3s of STAC and S3 round trips, and a
+    zero-result hint repeats it for the same area. A published release never
+    changes, so a successful lookup cannot go stale. A failed one raises, and
+    `lru_cache` does not cache a call that raises.
+    """
+    if not (bbox and stac):
+        return _s3_dataset(_dataset_path(overture_type, release),
+                           connect_timeout, request_timeout)
+    intersecting_files = _get_files_from_stac(
+        type_theme_map[overture_type], overture_type, BBox(*bbox), release
+    )
+    if intersecting_files is None:
+        raise _StacUnavailable()
+    if len(intersecting_files) == 0:
+        return None
+    return _s3_dataset(intersecting_files, connect_timeout, request_timeout)
+
+
+def _s3_dataset(source, connect_timeout, request_timeout) -> ds.Dataset:
+    """Open `source` (a partition path or a list of files) on Overture's S3 bucket."""
+    return ds.dataset(
+        source,
+        filesystem=fs.S3FileSystem(
+            anonymous=True,
+            region="us-west-2",
+            connect_timeout=connect_timeout,
+            request_timeout=request_timeout,
+        ),
+    )
 
 
 def _prepare_query(
@@ -246,25 +331,23 @@ def _prepare_query(
     request_timeout=None,
     stac=False,
     where_filters=None,
-) -> Optional[Tuple[ds.Dataset, Optional[pc.Expression]]]:
+) -> Optional[Tuple[ds.Dataset, Optional[pc.Expression], List[ParsedFilter]]]:
     """
-    Resolve the S3 dataset and filter expression for a given query.
+    Resolve the S3 dataset and filters for a given query.
 
-    Returns the dataset and filter expression ready for counting or streaming,
-    or None if STAC reports no files intersect the bbox.
+    Returns the dataset, the filter expression the scan pushes down, and the
+    filters to apply after the scan, or None if STAC reports no files
+    intersect the bbox.
     """
     if release is None:
         release = get_latest_release()
-    path = _dataset_path(overture_type, release)
     bbox_obj = _coerce_bbox(bbox)
-
-    intersecting_files = None
-    if bbox_obj and stac:
-        intersecting_files = _get_files_from_stac(
-            type_theme_map[overture_type], overture_type, bbox_obj, release
-        )
-        if intersecting_files is not None and len(intersecting_files) == 0:
-            return None
+    dataset = _open_dataset(
+        overture_type, bbox_obj.as_tuple() if bbox_obj else None, release,
+        connect_timeout, request_timeout, stac,
+    )
+    if dataset is None:
+        return None
 
     filter_expr = None
     if bbox_obj:
@@ -276,23 +359,13 @@ def _prepare_query(
             & (pc.field("bbox", "ymax") > ymin)
         )
 
-    dataset = ds.dataset(
-        intersecting_files if intersecting_files is not None else path,
-        filesystem=fs.S3FileSystem(
-            anonymous=True,
-            region="us-west-2",
-            connect_timeout=connect_timeout,
-            request_timeout=request_timeout,
-        ),
-    )
-
+    post_filters = []
     if where_filters:
-        from .filters import combine
-        attr_expr = combine(list(where_filters), dataset.schema)
+        attr_expr, post_filters = combine(list(where_filters), dataset.schema)
         if attr_expr is not None:
             filter_expr = attr_expr if filter_expr is None else filter_expr & attr_expr
 
-    return dataset, filter_expr
+    return dataset, filter_expr, post_filters
 
 
 def count_rows(
@@ -311,9 +384,29 @@ def count_rows(
     )
     if result is None:
         return 0
-    dataset, filter_expr = result
-    return dataset.count_rows(filter=filter_expr)
+    dataset, filter_expr, post_filters = result
+    if not post_filters:
+        return dataset.count_rows(filter=filter_expr)
+    # count_rows(filter=) cannot apply post-scan filters, so stream and sum,
+    # reading only the fields those filters need.
+    batches = _scan_batches(dataset, filter_expr, post_filter_fields(post_filters), post_filters)
+    return sum(b.num_rows for b in batches)
 
+
+
+def column_batches(overture_type, columns, bbox=None, release=None, stac=True):
+    """Stream only `columns` of `overture_type` in `bbox`, skipping any the release lacks.
+
+    Meant for a follow-up scan of an area just queried: the dataset comes
+    from the cache that query filled, and reading a few columns instead of
+    every field cuts a city-sized scan from about 6s to about 2s.
+    """
+    result = _prepare_query(overture_type, bbox, release, stac=stac)
+    if result is None:
+        return iter(())
+    dataset, filter_expr, _ = result
+    present = [c for c in columns if c in dataset.schema.names]
+    return dataset.to_batches(columns=present, filter=filter_expr, use_threads=True)
 
 
 def record_batch_reader(
@@ -324,6 +417,7 @@ def record_batch_reader(
     request_timeout=None,
     stac=False,
     where_filters=None,
+    columns=None,
 ) -> Optional[pa.RecordBatchReader]:
     """Return a pyarrow RecordBatchReader for the desired bounding box and s3 path, or None on error."""
     result = _prepare_query(
@@ -332,8 +426,9 @@ def record_batch_reader(
     )
     if result is None:
         return None
-    dataset, filter_expr = result
-    return _record_batch_reader_from_dataset(dataset, filter_expr=filter_expr)
+    dataset, filter_expr, post_filters = result
+    return _record_batch_reader_from_dataset(
+        dataset, filter_expr=filter_expr, columns=columns, post_filters=post_filters)
 
 
 def geodataframe(

@@ -63,8 +63,13 @@ to `download`:
    approximate `--bbox xmin,ymin,xmax,ymax` instead.
 3. **Count before pulling.** `botmap --json count -t TYPE --in "…"`.
 4. **Too many results?** Add `--where` / `--category` / `--class` filters, or
-   narrow the area with a tighter `--bbox`. Too few (or zero)? Widen the
-   `--bbox`, drop a filter, or check `categories`/`schema` for the right value.
+   narrow the area with a tighter `--bbox`. **Too few (or zero)?** Read the
+   yellow `[botmap]` hint on **stderr** first. For a place category filter it
+   names the right field or the closest real value. Then widen the `--bbox`,
+   drop a filter, or search the values with `categories --find` (Recipe 9).
+   Category values are singular: `restaurant`, not `restaurants`. A zero
+   count on a category filter takes a few seconds longer than a normal one,
+   because it scans the area for that hint.
 5. **Preview, then pull.** `sample -n 5` (or any verb with `-n`) to confirm
    shape, then run the verb to get the full set.
 
@@ -144,38 +149,66 @@ botmap --json containing 40.7484,-73.9857
 
 ### 9. Discover what categories exist in a place
 ```bash
-# Specific place categories.
+# Specific place categories (taxonomy.primary).
 botmap --json categories -t place --in "Brooklyn" --top 20
 
-# Broad place categories.
+# Broad place categories (basic_category).
 botmap --json basic-categories -t place --in "Brooklyn" --top 20
 ```
 
-`--category` and `--basic-category` are flags on the `places` verb only. They
-filter two separate vocabularies: `--category` matches `taxonomy.primary`,
-`--basic-category` matches a curated `basic_category` set roughly an order of
-magnitude smaller. `basic_category` is the broader of the two — many primary
-categories roll up to one basic value — but how much broader varies by subject,
-because Overture curated each basic value at whatever level suited it. So
-enumerate both and pick the value that matches the question:
+**Finding a category value.** Search the listed values with `--find` instead
+of dumping the list and grepping it:
 
 ```bash
-botmap --json categories -t place --in "…" --top 500        # taxonomy.primary
-botmap --json basic-categories -t place --in "…" --top 500  # basic_category
+botmap categories -t place --in "Cambridge, MA" --find vet --top 5
+# veterinarian, veterans_organization
 ```
+
+`--find` is a case-insensitive substring match, not a search by meaning: `vet`
+also finds `veterans_organization`, and `animal` does not find `veterinarian`.
+It works the same way on `basic-categories`.
+
+**Which category field.** Places carry three:
+
+| Field | Holds | Filter with |
+|---|---|---|
+| `basic_category` | a broad, curated label | `places --basic-category`, or `--where basic_category=…` |
+| `taxonomy.primary` | the detailed label | `places --category`, or `--where taxonomy.primary=…` |
+| `taxonomy.hierarchy` | a list of labels from the top group down to `taxonomy.primary` | `--where 'taxonomy.hierarchy contains …'` |
+
+`basic_category` is the broader of the first two: many primary categories
+roll up to one basic value. How much broader varies by subject, because
+Overture curated each basic value at whatever level suited it. Choose by the
+question:
+
+- **A broad ask** ("restaurants", "pharmacies") → `--basic-category`.
+- **A specific kind** ("coffee shops") → `--category`.
+- **A category and everything under it** ("Asian restaurants", including
+  Chinese and Thai) → `contains` on `taxonomy.hierarchy`.
 
 A `taxonomy.primary` value is not necessarily a leaf. `asian_restaurant` has
-`chinese_restaurant`, `thai_restaurant` and others beneath it, so filtering on
-it returns only places labelled `asian_restaurant` itself, not everything
-underneath. There is no roll-up filter yet; to cover a whole branch today,
-enumerate with `categories` and pass the values you want:
+`chinese_restaurant`, `thai_restaurant` and others beneath it, so
+`--where taxonomy.primary=asian_restaurant` returns only places labelled
+`asian_restaurant` itself. `contains` matches the value at any depth of the
+hierarchy, so it returns the whole branch, often many times as many places:
 
 ```bash
---where 'taxonomy.primary in [asian_restaurant,chinese_restaurant,thai_restaurant]'
+botmap --json count -t place --in "Cambridge, MA" \
+  --where 'taxonomy.hierarchy contains asian_restaurant'
 ```
 
-On every other command — `count`, `sample`, `at`, `download` — filter with
-`--where` instead. There is no `--category` flag on those:
+Don't hand-list child categories with `in [...]` to get the same effect. A
+hand-written list misses children you didn't think of.
+
+`~` is not a roll-up. `taxonomy.primary~restaurant` matches the text inside
+each value, so it picks up unrelated values such as
+`restaurant_equipment_and_supply` (a supplier) and misses children without
+the word, such as `steakhouse`. Use `~` to find names and `contains` to
+follow the hierarchy.
+
+`--category` and `--basic-category` are flags on the `places` verb only. On
+every other command (`count`, `sample`, `at`, `download`), filter with
+`--where` instead:
 
 ```bash
 botmap --json count -t place --in "Cambridge, MA" --where taxonomy.primary=coffee_shop
@@ -242,7 +275,7 @@ botmap addresses --bbox -71.07,42.35,-71.06,42.36 --postcode 02108
 
 | Type | Theme | Key properties |
 |---|---|---|
-| `place` | places | `taxonomy.primary` (hotel, restaurant, cafe, hospital, **bus_stop, bus_station, train_station**, ...), `basic_category`, `names.primary`, `confidence`, `addresses` |
+| `place` | places | `taxonomy.primary` (hotel, restaurant, cafe, hospital, **bus_stop, bus_station, train_station**, ...), `taxonomy.hierarchy` (list, filter with `contains`), `basic_category`, `names.primary`, `confidence`, `addresses` |
 | `building` | buildings | `height` (meters), `num_floors`, `class`, `subtype`, `roof_shape` |
 | `segment` | transportation | `class` — covers ALL segments, not just car roads: motorway, primary, secondary, residential, **footway, path, cycleway**, sidewalk; plus `subclass`, `surface`, `speed_limits`. Use the `roads` verb with `--class`. |
 | `division` | divisions | `subtype` (country, region, county, locality, neighborhood, ...), `admin_level`, `population`. Use `where … --geometry` for the boundary polygon. |
@@ -254,14 +287,24 @@ Run `botmap --json schema -t TYPE` for the full field list of any type.
 
 ## Filter expression syntax
 
-Operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`. Keys are dot-paths into the
-type's schema. Multiple `--where` flags AND together.
+Operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `~`, `contains`. Keys are
+dot-paths into the type's schema. Multiple `--where` flags AND together.
 
 ```
 --where taxonomy.primary=restaurant
 --where 'height>100'
 --where "class in [motorway,primary,trunk]"
+--where 'names.primary~pizza'
+--where 'taxonomy.hierarchy contains restaurant'
 ```
+
+- **`~`** is a case-insensitive substring match on a text field. It is not a
+  regular expression: `~^vet` looks for a literal caret. Spaces around it are
+  optional.
+- **`contains`** keeps rows whose list field holds one exact value. It takes
+  a single value, not a `[a,b]` list. List fields such as
+  `taxonomy.hierarchy` accept only `contains`; the CLI rejects `=` or `~` on
+  them and says so.
 
 **Always single-quote any `--where` expression containing `<` or `>`.**
 Unquoted, the shell treats `>` as a redirection: `--where height>150` writes a

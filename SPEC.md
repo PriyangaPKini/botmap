@@ -141,10 +141,16 @@ def record_batch_reader(
     connect_timeout: int | None = None,
     request_timeout: int | None = None,
     stac: bool = False,
+    where_filters: list[ParsedFilter] | None = None,
+    columns: list[str] | None = None,
 ) -> pyarrow.RecordBatchReader | None
 ```
 
 - Returns a streaming `RecordBatchReader`; returns `None` if no data matches.
+- `where_filters` are parsed `--where` expressions (§5.6). Most are pushed
+  down into the scan; `contains` filters run on each batch after it is read.
+- `columns` projects the output to the named top-level fields. Fields a
+  post-scan filter needs are read and then dropped again.
 - `bbox=None` queries globally (large data warning applies at CLI layer, not here).
 - `release=None` resolves to latest release.
 - When `stac=True`, uses STAC spatial index to minimize file scanning.
@@ -285,6 +291,49 @@ If a schema has `taxonomy.primary` but no `categories.primary`, raw filters on
 `categories.primary` raise a usage error that names `taxonomy.primary` as the
 successor. If both fields are present, `categories.primary` remains a valid raw
 field path.
+
+Both enumeration commands take `--find TEXT`, which keeps the listed values
+containing `TEXT`, ignoring case. It is a substring match, not a semantic one.
+
+### 5.6 Attribute filters (`--where`)
+
+Every command that takes `--where` parses `K OP V`, where `K` is a dot-path
+into the type's schema. Repeated `--where` flags AND together.
+
+| Operator | Meaning | Field type |
+|---|---|---|
+| `=`, `!=`, `<`, `<=`, `>`, `>=` | comparison | scalar |
+| `in` | value is one of `[a,b,c]` | scalar |
+| `~` | case-insensitive substring, not a regex | string |
+| `contains` | list holds this one value | list |
+
+Filters are validated against the schema before any data is read. Each of
+these is a usage error that names the fix: an unknown field, an unknown
+operator (the message lists the supported ones), `~` on a non-string field,
+`contains` on a non-list field or on a list of records, a `contains` value
+that cannot match the list's item type, any other operator on a list field,
+and `contains [a,b]`.
+
+PyArrow has no list-membership kernel, so `contains` cannot be pushed down
+into the scan. `filters.combine()` returns the pushdown expression and the
+post-scan filters separately. `record_batch_reader` applies post-scan filters
+to each batch, and `count_rows` streams and sums instead of calling
+`dataset.count_rows(filter=)` when any exist.
+
+**Zero-result hint.** `places`, `count`, `sample` and `at` call one shared
+hint (`category_taxonomy.zero_result_hint`) when a `place` query filtering
+`taxonomy.primary` or `basic_category` with `=` or `in` returns zero rows. It
+scans the area's two category columns once, reusing the dataset the query
+already opened, and writes to stderr only:
+
+- A value from the other vocabulary: name the right field, and for a
+  `taxonomy.primary` value, the `basic_category` it sits under.
+- A value present in its own vocabulary: no hint, since another filter
+  caused the zero.
+- Otherwise: up to three near matches, or a pointer to the listing command.
+
+If the hint scan fails with an I/O or PyArrow error, the hint is skipped and the
+command's result and exit code are unchanged.
 
 ---
 

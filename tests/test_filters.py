@@ -192,3 +192,126 @@ class TestValidateAgainstSchema:
         with pytest.raises(ValueError) as exc:
             f.validate_against_schema(schema)
         assert "a.b is not a struct" in str(exc.value)
+
+
+class TestUnknownOperator:
+    def test_named_operator_is_reported(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name like cafe")
+        msg = str(exc.value)
+        assert "like" in msg
+        assert "'in'" in msg or " in," in msg or "in," in msg
+        assert "~" in msg
+
+    def test_lists_the_supported_operators(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("class isnt motorway")
+        msg = str(exc.value)
+        for op in ("=", "!=", "<=", ">=", "in", "~"):
+            assert op in msg, f"{op!r} missing from {msg!r}"
+
+    def test_no_operator_keeps_the_shell_redirection_hint(self):
+        """A single token has no operator at all; that hint must survive."""
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("height150")
+        assert "no operator" in str(exc.value).lower()
+        assert "single quotes" in str(exc.value)
+
+    def test_unknown_operator_beats_the_generic_message(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name like cafe")
+        assert "no operator" not in str(exc.value).lower()
+
+
+class TestMissingOperatorIsNotMistakenForAnUnknownOne:
+    def test_value_words_keep_the_generic_message(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("names.primary Blue Bottle")
+        msg = str(exc.value)
+        assert "no operator" in msg.lower()
+        assert "Blue" not in msg.split("Filter")[0]
+
+    def test_operator_lookalike_is_named(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name LIKE cafe")
+        assert "Unsupported operator 'LIKE'" in str(exc.value)
+
+
+def _list_schema():
+    return pa.schema([
+        ("taxonomy", pa.struct([
+            ("primary", pa.string()),
+            ("hierarchy", pa.list_(pa.string())),
+        ])),
+    ])
+
+
+class TestContainsParsing:
+    def test_contains_parses_to_scalar_value(self):
+        assert parse_where_expr("taxonomy.hierarchy contains restaurant") == ParsedFilter(
+            key="taxonomy.hierarchy", op="contains", value="restaurant")
+
+    def test_contains_rejects_a_list_value(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("taxonomy.hierarchy contains [restaurant,cafe]")
+        assert "contains" in str(exc.value)
+        assert "single value" in str(exc.value)
+
+    def test_contains_is_listed_as_supported(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("name like cafe")
+        assert "contains" in str(exc.value)
+
+
+class TestListFieldValidation:
+    def test_contains_on_list_field_is_allowed(self):
+        ParsedFilter("taxonomy.hierarchy", "contains", "restaurant").validate_against_schema(
+            _list_schema())
+
+    def test_contains_on_scalar_field_is_rejected(self):
+        with pytest.raises(ValueError) as exc:
+            ParsedFilter("taxonomy.primary", "contains", "x").validate_against_schema(
+                _list_schema())
+        msg = str(exc.value)
+        assert "taxonomy.primary" in msg
+        assert "not a list" in msg
+
+    def test_equals_on_list_field_suggests_contains(self):
+        with pytest.raises(ValueError) as exc:
+            ParsedFilter("taxonomy.hierarchy", "=", "restaurant").validate_against_schema(
+                _list_schema())
+        msg = str(exc.value)
+        assert "taxonomy.hierarchy" in msg
+        assert "taxonomy.hierarchy contains restaurant" in msg
+
+    def test_tilde_on_list_field_suggests_contains(self):
+        with pytest.raises(ValueError) as exc:
+            ParsedFilter("taxonomy.hierarchy", "~", "rest").validate_against_schema(
+                _list_schema())
+        assert "contains" in str(exc.value)
+
+
+class TestContainsElementType:
+    def test_list_of_records_is_rejected(self):
+        schema = pa.schema([("addresses", pa.list_(pa.struct([("country", pa.string())])))])
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("addresses contains US").validate_against_schema(schema)
+        msg = str(exc.value)
+        assert "addresses" in msg
+        assert "plain values" in msg
+
+    def test_value_that_looks_numeric_stays_text(self):
+        assert parse_where_expr("taxonomy.hierarchy contains 5").value == "5"
+
+    def test_value_that_cannot_be_the_element_type_is_rejected(self):
+        schema = pa.schema([("ids", pa.list_(pa.int64()))])
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("ids contains abc").validate_against_schema(schema)
+        assert "abc" in str(exc.value)
+
+    def test_in_on_a_list_field_does_not_suggest_a_list_value(self):
+        with pytest.raises(ValueError) as exc:
+            parse_where_expr("taxonomy.hierarchy in [a,b]").validate_against_schema(_list_schema())
+        msg = str(exc.value)
+        assert "contains [" not in msg
+        assert "one value" in msg

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import click
 import orjson
+import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -25,6 +26,7 @@ from .core import (
     get_all_overture_types,
     get_available_releases,
     get_latest_release,
+    column_batches,
     record_batch_reader,
     record_batch_reader_from_gers,
     type_theme_map,
@@ -33,10 +35,21 @@ from .models import Backend, BBox, PipelineState
 from .releases import list_releases, release_exists
 from .state import get_state_path, load_state, save_state
 from .writers import copy, get_writer
+from .category_taxonomy import CATEGORY_COLUMNS, category_pairs, zero_result_hint
 from .filters import parse_where_expr, ParsedFilter
 from .geocoding import resolve
 from .cache import cache_info, clear_cache, build_index, index_path
 from . import skill_installer
+
+
+# One description of --where for every command that takes it.
+WHERE_HELP = (
+    "Attribute filter K OP V; repeat to AND several. Operators: = != < <= > >= "
+    "in ~ contains. `~` is a case-insensitive substring match, not a regex. "
+    "`contains` keeps rows whose list field (e.g. taxonomy.hierarchy) holds one "
+    "value. Single-quote expressions with <, > or spaces: "
+    "--where 'height>50', --where 'taxonomy.hierarchy contains restaurant'."
+)
 
 
 def _safe_reader(type_, bbox, release, ct, rt, stac, **kw):
@@ -94,59 +107,39 @@ def _describe_division(d) -> str:
     return f"{d.name} ({d.subtype}, {qual}, {pop})"
 
 
-def _suggest_categories(type_: str, bbox, release, target: str, n: int = 3):
-    """Scan `bbox` for `taxonomy.primary` values and return up to `n`
-    closest matches to `target`. Used to power 0-result hints — only call
-    on the failure path, since this issues a second scan of the bbox.
+# Fields whose zero-row result gets a category hint, and the operators that name one value.
+_CATEGORY_FIELDS = ("taxonomy.primary", "basic_category")
+_CATEGORY_OPERATORS = ("=", "in")
 
-    Ranking is token-aware: `ferry_terminal` should match `ferry_service`
-    via the shared "ferry" token, not `cafeteria` via character overlap.
+
+def _emit_zero_result_hint(type_, bbox, release, where_filters) -> None:
+    """After a zero-row place query, explain a category filter's likely mistake on stderr.
+
+    Only call on the zero-row path: it scans the area's categories again.
     """
-    reader = record_batch_reader(type_, bbox, release, None, None, True)
-    if reader is None:
-        return []
-    seen: set[str] = set()
-    while True:
-        try:
-            batch = reader.read_next_batch()
-        except StopIteration:
-            break
-        if batch.num_rows == 0:
-            continue
-        cat_col = batch.column("taxonomy")
-        primary = pc.struct_field(cat_col, "primary").to_pylist()
-        for v in primary:
-            if v is not None:
-                seen.add(v)
-    if not seen:
-        return []
+    targets = _category_filter_targets(type_, where_filters)
+    if not targets:
+        return
+    try:
+        pairs = category_pairs(column_batches("place", CATEGORY_COLUMNS, bbox, release))
+    except (OSError, pa.ArrowException):
+        return  # The hint is a courtesy; a failed scan must not fail the query.
+    hints = (zero_result_hint(field, value, pairs) for field, value in targets)
+    hint = next((h for h in hints if h), None)
+    if hint:
+        click.secho(hint, fg="yellow", err=True)
 
-    import difflib
-    target_lower = target.lower()
-    target_tokens = set(target_lower.replace("_", " ").split())
-    matcher = difflib.SequenceMatcher(autojunk=False)
-    matcher.set_seq1(target_lower)
 
-    # Inclusion rules (any one passes):
-    #   - token overlap >= 1  → "ferry_terminal" ~ "ferry_service"
-    #   - substring          → "cafe" ~ "cafeteria"
-    #   - ratio >= 0.75      → typo correction ("coffe_shop" ~ "coffee_shop")
-    # Anything weaker is noise (e.g. cafeteria ~ ferry_terminal at 0.609).
-    scored = []
-    for v in seen:
-        v_lower = v.lower()
-        matcher.set_seq2(v_lower)
-        ratio = matcher.ratio()
-        v_tokens = set(v_lower.replace("_", " ").split())
-        token_overlap = len(target_tokens & v_tokens)
-        substring_hit = int(target_lower in v_lower or v_lower in target_lower)
-        if token_overlap or substring_hit or ratio >= 0.75:
-            score = ratio + 0.2 * token_overlap + 0.15 * substring_hit
-            scored.append((score, v))
-    if not scored:
+def _category_filter_targets(type_, where_filters):
+    """Return every (field, value) a place category filter names, in order."""
+    if type_ != "place":
         return []
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [v for _, v in scored[:n]]
+    return [
+        (f.key, str(value))
+        for f in where_filters or []
+        if f.key in _CATEGORY_FIELDS and f.op in _CATEGORY_OPERATORS
+        for value in (f.value if f.op == "in" else [f.value])
+    ]
 
 
 def _no_match_help(query: str) -> str:
@@ -490,8 +483,7 @@ def cli(ctx, json_output):
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str,
               help="Resolve a place name to a bbox via the divisions index.")
-@click.option("--where", "where_exprs", multiple=True,
-              help="Attribute filter K OP V (repeatable). Example: --where height>50")
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option(
     "-f",
     "output_format",
@@ -810,7 +802,7 @@ def boundary(ctx, query):
               type=click.Choice(get_all_overture_types()), required=True)
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
@@ -844,6 +836,8 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
         })
     else:
         click.echo(f"{n:,}")
+    if n == 0:
+        _emit_zero_result_hint(type_, bbox, release, where_filters)
 
 
 @cli.command()
@@ -851,7 +845,7 @@ def count(ctx, type_, bbox, in_place, where_exprs, release):
               type=click.Choice(get_all_overture_types()), required=True)
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", default=10, show_default=True, type=int,
               help="Maximum number of features to emit.")
 @click.option("-f", "output_format",
@@ -890,7 +884,9 @@ def sample(type_, bbox, in_place, where_exprs, n, output_format, output, release
     limited = _limit_reader(reader, n)
 
     with get_writer(output_format, output_file, schema=limited.schema) as writer:
-        copy(limited, writer)
+        rows_written = copy(limited, writer)
+    if rows_written == 0:
+        _emit_zero_result_hint(type_, bbox, release, where_filters)
 
 
 @cli.command()
@@ -1038,15 +1034,31 @@ def _emit_count_payload(ctx, payload) -> None:
         click.echo(f"  {row['count']:>8,}  {row['value']}")
 
 
+def _matching_values(counts: dict[str, int], find: str | None) -> dict[str, int]:
+    """Keep the values containing `find`, case-insensitively.
+
+    Plain substring matching, not semantic search: `animal` does not find
+    `veterinarian`. The Skill and help text say so, because an agent that
+    expects otherwise reads an empty result as "this area has none".
+    """
+    if not find:
+        return counts
+    needle = find.lower()
+    return {v: c for v, c in counts.items() if needle in v.lower()}
+
+
 def _enumerate_place_values(
     ctx, bbox, release, top, column_name: str, struct_field: str | None = None,
+    find: str | None = None,
 ) -> None:
-    reader = record_batch_reader("place", bbox, release, None, None, True)
+    reader = record_batch_reader(
+        "place", bbox, release, None, None, True, columns=[column_name])
     if reader is None:
         if ctx.obj.get("json"):
             _emit_json(ctx, [])
         return
     counts = _count_reader_values(reader, column_name, struct_field)
+    counts = _matching_values(counts, find)
     _emit_count_payload(ctx, _ranked_count_payload(counts, top))
 
 
@@ -1058,10 +1070,13 @@ def _enumerate_place_values(
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
 @click.option("--top", default=20, show_default=True, type=int)
+@click.option("--find", "find", required=False, type=str,
+              help="Case-insensitive substring search over the listed values "
+                   "(not semantic search).")
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
-def categories(ctx, type_, bbox, in_place, top, release):
+def categories(ctx, type_, bbox, in_place, top, find, release):
     """Enumerate `taxonomy.primary` values, sorted by count desc."""
     if type_ != "place":
         verb = TYPE_TO_VERB.get(type_)
@@ -1077,7 +1092,7 @@ def categories(ctx, type_, bbox, in_place, top, release):
             f"Run `botmap --json schema -t {type_}` to inspect available fields."
         )
     bbox = _resolve_enumeration_bbox(bbox, in_place)
-    _enumerate_place_values(ctx, bbox, release, top, "taxonomy", "primary")
+    _enumerate_place_values(ctx, bbox, release, top, "taxonomy", "primary", find)
 
 
 @cli.command("basic-categories")
@@ -1087,10 +1102,13 @@ def categories(ctx, type_, bbox, in_place, top, release):
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
 @click.option("--top", default=20, show_default=True, type=int)
+@click.option("--find", "find", required=False, type=str,
+              help="Case-insensitive substring search over the listed values "
+                   "(not semantic search).")
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
-def basic_categories(ctx, type_, bbox, in_place, top, release):
+def basic_categories(ctx, type_, bbox, in_place, top, find, release):
     """Enumerate `basic_category` values, sorted by count desc."""
     if type_ != "place":
         verb = TYPE_TO_VERB.get(type_)
@@ -1108,7 +1126,7 @@ def basic_categories(ctx, type_, bbox, in_place, top, release):
             f"available fields."
         )
     bbox = _resolve_enumeration_bbox(bbox, in_place)
-    _enumerate_place_values(ctx, bbox, release, top, "basic_category")
+    _enumerate_place_values(ctx, bbox, release, top, "basic_category", None, find)
 
 
 @cli.command()
@@ -1177,7 +1195,7 @@ def cache_build_cmd():
               help="Shortcut for --where taxonomy.primary=VAL")
 @click.option("--basic-category", required=False, type=str,
               help="Shortcut for --where basic_category=VAL")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1233,35 +1251,7 @@ def places(
         rows_written = copy(reader, writer)
 
     if rows_written == 0:
-        # Zero-result hint: was a taxonomy.primary filter the cause?
-        # If so, suggest near-match values from the bbox's actual category list.
-        cat_filters = [
-            f for f in filters
-            if f.key == "taxonomy.primary" and f.op in ("=", "in")
-        ]
-        if cat_filters:
-            target = cat_filters[0].value
-            if isinstance(target, list):
-                target = target[0] if target else None
-            if target:
-                hits = _suggest_categories("place", bbox, release, str(target))
-                if hits:
-                    click.secho(
-                        f"[botmap] 0 rows. No place has "
-                        f"taxonomy.primary={target!r} in this bbox. "
-                        f"Did you mean: {', '.join(hits)}? "
-                        f"Run `botmap categories -t place --bbox …` "
-                        f"to see the full list.",
-                        fg="yellow", err=True,
-                    )
-                else:
-                    click.secho(
-                        f"[botmap] 0 rows. taxonomy.primary={target!r} "
-                        f"is not present in this bbox. Run "
-                        f"`botmap categories -t place --bbox …` "
-                        f"to see what's available.",
-                        fg="yellow", err=True,
-                    )
+        _emit_zero_result_hint("place", bbox, release, filters)
 
 
 @cli.command()
@@ -1269,7 +1259,7 @@ def places(
               help="Resolve a place name to a bbox via the divisions index.")
 @click.option("--bbox", required=False, type=BboxParamType(),
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1318,7 +1308,7 @@ def buildings(in_place, bbox, where_exprs, limit, output_format, output, release
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
 @click.option("--class", "road_class", required=False, type=str,
               help="Shortcut for --where class=VAL (e.g. motorway, primary)")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1370,7 +1360,7 @@ def roads(in_place, bbox, road_class, where_exprs, limit, output_format, output,
               help="Bounding box xmin,ymin,xmax,ymax. Mutually exclusive with --in.")
 @click.option("--class", "water_class", required=False, type=str,
               help="Shortcut for --where class=VAL (e.g. ocean, lake, river, stream)")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1423,7 +1413,7 @@ def water(in_place, bbox, water_class, where_exprs, limit, output_format, output
 @click.option("--class", "landuse_class", required=False, type=str,
               help="Shortcut for --where class=VAL "
                    "(e.g. commercial, residential, recreation, agriculture)")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1479,7 +1469,7 @@ def landuse(in_place, bbox, landuse_class, where_exprs, limit, output_format, ou
               help="House/building number (exact match; field is a string, so \"1208\" or \"1208A\").")
 @click.option("--postcode", required=False, type=str,
               help="Postal code (exact match).")
-@click.option("--where", "where_exprs", multiple=True)
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-n", "--limit", "limit", default=None, type=int,
               help="Maximum number of features to emit (default: all matches).")
 @click.option("-f", "output_format",
@@ -1545,9 +1535,7 @@ def addresses(in_place, bbox, street, number, postcode, where_exprs, limit,
 @click.option("-n", default=10, show_default=True, type=int)
 @click.option("-r", "--radius", type=int, required=False,
               help="Radius in meters; defaults per type.")
-@click.option("--where", "where_exprs", multiple=True,
-              help="Attribute filter K OP V (repeatable). "
-                   "Example: --where taxonomy.primary=coffee_shop")
+@click.option("--where", "where_exprs", multiple=True, help=WHERE_HELP)
 @click.option("-f", "output_format",
               type=click.Choice(["geojson", "geojsonseq", "geoparquet"]),
               default="geojsonseq", show_default=True)
@@ -1610,6 +1598,7 @@ def at(latlon, type_, n, radius, where_exprs, output_format, output, release, js
 
     # Build a fresh reader over the kept rows and stream through the writer.
     if not rows:
+        _emit_zero_result_hint(type_, bbox, release, where_filters)
         return
 
     sample_batch_props = [r[1] for r in rows]
