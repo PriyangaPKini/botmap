@@ -1038,15 +1038,31 @@ def _emit_count_payload(ctx, payload) -> None:
         click.echo(f"  {row['count']:>8,}  {row['value']}")
 
 
+def _matching_values(counts: dict[str, int], find: str | None) -> dict[str, int]:
+    """Keep the values containing `find`, case-insensitively.
+
+    Plain substring matching, not semantic search: `animal` does not find
+    `veterinarian`. The Skill and help text say so, because an agent that
+    expects otherwise reads an empty result as "this area has none".
+    """
+    if not find:
+        return counts
+    needle = find.lower()
+    return {v: c for v, c in counts.items() if needle in v.lower()}
+
+
 def _enumerate_place_values(
     ctx, bbox, release, top, column_name: str, struct_field: str | None = None,
+    find: str | None = None,
 ) -> None:
-    reader = record_batch_reader("place", bbox, release, None, None, True)
+    reader = record_batch_reader(
+        "place", bbox, release, None, None, True, columns=[column_name])
     if reader is None:
         if ctx.obj.get("json"):
             _emit_json(ctx, [])
         return
     counts = _count_reader_values(reader, column_name, struct_field)
+    counts = _matching_values(counts, find)
     _emit_count_payload(ctx, _ranked_count_payload(counts, top))
 
 
@@ -1058,10 +1074,13 @@ def _enumerate_place_values(
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
 @click.option("--top", default=20, show_default=True, type=int)
+@click.option("--find", "find", required=False, type=str,
+              help="Case-insensitive substring search over the listed values "
+                   "(not semantic search).")
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
-def categories(ctx, type_, bbox, in_place, top, release):
+def categories(ctx, type_, bbox, in_place, top, find, release):
     """Enumerate `taxonomy.primary` values, sorted by count desc."""
     if type_ != "place":
         verb = TYPE_TO_VERB.get(type_)
@@ -1077,7 +1096,7 @@ def categories(ctx, type_, bbox, in_place, top, release):
             f"Run `botmap --json schema -t {type_}` to inspect available fields."
         )
     bbox = _resolve_enumeration_bbox(bbox, in_place)
-    _enumerate_place_values(ctx, bbox, release, top, "taxonomy", "primary")
+    _enumerate_place_values(ctx, bbox, release, top, "taxonomy", "primary", find)
 
 
 @cli.command("basic-categories")
@@ -1087,10 +1106,13 @@ def categories(ctx, type_, bbox, in_place, top, release):
 @click.option("--bbox", required=False, type=BboxParamType())
 @click.option("--in", "in_place", required=False, type=str)
 @click.option("--top", default=20, show_default=True, type=int)
+@click.option("--find", "find", required=False, type=str,
+              help="Case-insensitive substring search over the listed values "
+                   "(not semantic search).")
 @click.option("-r", "--release", default=None, callback=validate_release,
               required=False)
 @click.pass_context
-def basic_categories(ctx, type_, bbox, in_place, top, release):
+def basic_categories(ctx, type_, bbox, in_place, top, find, release):
     """Enumerate `basic_category` values, sorted by count desc."""
     if type_ != "place":
         verb = TYPE_TO_VERB.get(type_)
@@ -1108,7 +1130,7 @@ def basic_categories(ctx, type_, bbox, in_place, top, release):
             f"available fields."
         )
     bbox = _resolve_enumeration_bbox(bbox, in_place)
-    _enumerate_place_values(ctx, bbox, release, top, "basic_category")
+    _enumerate_place_values(ctx, bbox, release, top, "basic_category", None, find)
 
 
 @cli.command()
