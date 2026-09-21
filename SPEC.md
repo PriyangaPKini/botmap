@@ -332,7 +332,7 @@ already opened, and writes to stderr only:
   caused the zero.
 - Otherwise: up to three near matches, or a pointer to the listing command.
 
-If the hint scan fails with an I/O error, the hint is skipped and the
+If the hint scan fails with an I/O or PyArrow error, the hint is skipped and the
 command's result and exit code are unchanged.
 
 ---
