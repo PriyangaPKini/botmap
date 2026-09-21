@@ -7,6 +7,7 @@ import operator
 from dataclasses import dataclass
 from typing import Any, List, Tuple, Union
 
+import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
 
@@ -144,8 +145,9 @@ def list_contains_mask(column: pa.Array, value: Any) -> pa.BooleanArray:
     element = _as_element(value, column.type.value_type)
     matching_rows = pc.filter(pc.list_parent_indices(column),
                               pc.equal(pc.list_flatten(column), element))
-    row_numbers = pa.array(range(len(column)), type=pa.int64())
-    return pc.is_in(row_numbers, value_set=matching_rows)
+    mask = np.zeros(len(column), dtype=bool)
+    mask[matching_rows.to_numpy()] = True
+    return pa.array(mask)
 
 
 def _as_element(value: Any, element_type: pa.DataType) -> pa.Scalar:
