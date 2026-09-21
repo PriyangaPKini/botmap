@@ -10,15 +10,17 @@ import pyarrow.compute as pc
 
 
 # Operators ordered longest-first so the splitter doesn't mistake `>=` for `>`.
-_OPERATORS = ["<=", ">=", "!=", " in ", "=", "<", ">"]
+_OPERATORS = ["<=", ">=", "!=", " in ", "=", "<", ">", "~"]
+
+# Operators that only make sense on a string field.
+_STRING_ONLY_OPERATORS = ("~",)
 
 
 @dataclass(frozen=True)
 class ParsedFilter:
     key: str
-    # User-facing ops from --where: =, !=, <, <=, >, >=, in
-    # Internal ops synthesized by subcommands (not parsed from --where):
-    #   ~ : case-insensitive substring match (used by `addresses --street`)
+    # User-facing ops from --where: =, !=, <, <=, >, >=, in, ~
+    #   ~ : case-insensitive substring match, also used by `addresses --street`
     op: str
     value: Any  # str | int | float | bool | list
 
@@ -76,6 +78,15 @@ class ParsedFilter:
                     f"Available subfields: {', '.join(sorted(child_names))}"
                 )
             current_type = current_type.field(child_names.index(part)).type
+        self._validate_operator_against_type(current_type)
+
+    def _validate_operator_against_type(self, field_type: pa.DataType) -> None:
+        """Reject an operator the resolved field type cannot support."""
+        if self.op in _STRING_ONLY_OPERATORS and not pa.types.is_string(field_type):
+            raise ValueError(
+                f"Operator '{self.op}' needs a string field, but {self.key!r} is "
+                f"{field_type}. Use a comparison such as '=' instead."
+            )
 
 
 def _has_taxonomy_primary(schema: pa.Schema) -> bool:
