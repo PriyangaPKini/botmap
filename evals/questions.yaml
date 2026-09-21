@@ -86,11 +86,11 @@
 - id: busstops-coffee-williamsburg
   question: "How many bus stops have a coffee shop within 100m in Williamsburg, Brooklyn?"
   tier: 5
-  download_is_legitimate: false
-  target_type: place
+  download_is_legitimate: true
+  target_type: infrastructure
   place: "Williamsburg, US-NY"
-  notes: "Both layers are places; fetch each and join in code. download -t place is a failure."
+  notes: "Bus stops are infrastructure (class=bus_stop), not places; coffee shops are places. No convenience verb for infrastructure, so download -t infrastructure is correct. Fetch each layer and join in code."
   subtasks:
-    - "places --in Williamsburg --category bus_stop"
+    - "download -t infrastructure --in Williamsburg --where class=bus_stop"
     - "places --in Williamsburg --category coffee_shop"
     - "spatial join + count: bus stops with a coffee shop within 100m"

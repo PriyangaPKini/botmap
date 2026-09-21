@@ -391,9 +391,15 @@ take `--class` just like `roads`. Running `download -t TYPE` for a type covered
 by one of these verbs prints a one-line stderr tip pointing at the verb. All
 data verbs accept a trailing `--json` flag silently (they already emit GeoJSON).
 
-Transit stops (`bus_stop`, `bus_station`, `train_station`) are `place` features —
-`download -t infrastructure --where class=bus_stop` will error and redirect to
-`places --category bus_stop`.
+Transit stops are `infrastructure` features (`subtype=transit`), not places:
+Overture keeps places for destinations. There is no convenience verb for
+infrastructure, so filter by class with any command that takes `-t`:
+
+```bash
+botmap at 42.3735,-71.1184 -t infrastructure --where class=bus_stop -n 3 --radius 400
+botmap download -t infrastructure --in "Cambridge, MA" --where class=bus_stop \
+  -f geojsonseq -o busstops.jsonl
+```
 
 ```bash
 # POIs by category (named place)

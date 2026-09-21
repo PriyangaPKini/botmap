@@ -44,24 +44,41 @@ def test_download_hints_verb_for_covered_type(monkeypatch):
         assert "Tip" in result.output
 
 
-def test_download_infrastructure_hint_points_to_places(monkeypatch):
-    """infrastructure downloads get a hint that transit stops are place features."""
+def _download_infrastructure(monkeypatch, *where):
+    """Run `download -t infrastructure` and return (result, the filters it read with)."""
+    captured = {}
+
+    def fake_reader(*args, where_filters=None, **kwargs):
+        captured["where_filters"] = where_filters
+        return _DummyReader()
+
     monkeypatch.setattr("botmap.cli.get_latest_release", lambda: "2024-11-13.0")
-    monkeypatch.setattr(
-        "botmap.cli.record_batch_reader", lambda *a, **k: _DummyReader()
-    )
+    monkeypatch.setattr("botmap.cli.record_batch_reader", fake_reader)
     monkeypatch.setattr("botmap.cli.get_writer", lambda *a, **k: _DummyWriter())
     monkeypatch.setattr("botmap.cli.copy", lambda *a, **k: None)
 
+    args = ["download", "-f", "geojsonseq", "-t", "infrastructure",
+            "--bbox", "-71.07,42.35,-71.06,42.36"]
+    for expr in where:
+        args += ["--where", expr]
     runner = CliRunner()
     with runner.isolated_filesystem():
-        result = runner.invoke(cli, [
-            "download", "-f", "geojsonseq", "-t", "infrastructure",
-            "--bbox", "-71.07,42.35,-71.06,42.36",
-        ])
-        assert result.exit_code == 0, result.output
-        assert "bus_stop" in result.output
-        assert "places" in result.output
+        result = runner.invoke(cli, args)
+    return result, captured.get("where_filters")
+
+
+@pytest.mark.parametrize("expr", ["class=bus_stop", "class=bus_station", "subtype=transit"])
+def test_download_infrastructure_transit_is_allowed(monkeypatch, expr):
+    """Overture keeps transit stops in infrastructure (subtype=transit), not places."""
+    result, where_filters = _download_infrastructure(monkeypatch, expr)
+    assert result.exit_code == 0, result.output
+    assert [f"{f.key}{f.op}{f.value}" for f in where_filters] == [expr]
+
+
+def test_download_infrastructure_does_not_redirect_to_places(monkeypatch):
+    result, _ = _download_infrastructure(monkeypatch)
+    assert result.exit_code == 0, result.output
+    assert "places" not in result.output
 
 
 def test_download_hint_is_actionable_command(monkeypatch):
