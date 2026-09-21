@@ -66,7 +66,9 @@ case-insensitive substring search, not semantic search.
 
 **Column projection.** `core.py:210` calls `dataset.to_batches()` with no
 `columns=`, so `categories` reads all 28 columns to count one field. Both
-enumeration commands must project. Measured at 3.3x, 2.08s against 0.63s.
+enumeration commands must project. A first measurement showed 3.3x (2.08s
+against 0.63s); a later one, taken while S3 was busy, showed 1.3x. Task 6.4
+re-measures before either number is quoted.
 
 ### 3.2 Flags
 
@@ -87,7 +89,8 @@ it because `restaurant` is one of the hierarchy values. A query for
 `restaurant` therefore returns all places under that parent category, including
 `steakhouse`, `pizza_restaurant` and other child categories.
 
-It cannot be pushed down, because PyArrow 22 has no list-membership kernel and
+It cannot be pushed down, because PyArrow (checked through version 25) has no
+list-membership kernel and
 `list_flatten` is rejected in a scan filter as non-scalar, since a filter must
 return one value per row. So it runs after rows are read:
 
@@ -121,7 +124,7 @@ searches for a literal caret. The Skill and the error messages must say so.
 `~` finds names, `contains` matches structure, and they are not substitutes.
 `taxonomy.primary~restaurant` matches 864 places against 805 for
 `hierarchy contains restaurant`, over-counting by 68 including
-`restaurant_equipment_and_supply`, a shop, and missing `steakhouse` and
+`restaurant_equipment_and_supply`, a business supplier, and missing `steakhouse` and
 `pancake_house`.
 
 ---
@@ -138,10 +141,15 @@ Every case below currently crashes or returns a silent zero.
 | `--where 'taxonomy.hierarchy~x'` | `UsageError`: list field, use `contains` |
 | `--where 'height~x'` | `UsageError`: `~` needs a string field |
 | `--where 'K contains [a,b]'` | `UsageError`: scalar value only |
+| `--where 'addresses contains x'` | `UsageError`: `contains` needs a list of plain values, not records |
+| `--where 'ids contains abc'` on a list of numbers | `UsageError`: the value cannot match the list's item type |
 | `--where 'name like cafe'` | `UsageError`: unknown operator, and list supported operators |
 
-The parser must report unknown operators before it falls back to the generic
-"no operator" message. The error names the unsupported operator and lists the
+The parser must report an unknown operator before it falls back to the generic
+"no operator" message, but only when the word is recognisably an operator
+(such as `like` or `isnt`). A filter with no operator at all, such as
+`names.primary Blue Bottle`, keeps the generic message, because `Blue` is part
+of the value, not an operator. The error names the unsupported operator and lists the
 supported operators: `=`, `!=`, `<`, `<=`, `>`, `>=`, `in`, `~` and `contains`.
 
 `validate_against_schema` (`filters.py:51`) walks structs only and gains list
