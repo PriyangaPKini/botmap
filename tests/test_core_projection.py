@@ -50,3 +50,25 @@ def test_projection_keeps_geometry_tagged_when_included():
     reader = _record_batch_reader_from_dataset(_dataset(), columns=["id", "geometry"])
     meta = reader.schema.field("geometry").metadata or {}
     assert meta.get(b"ARROW:extension:name") == b"geoarrow.wkb"
+
+
+def test_read_error_goes_to_stderr_not_stdout(capsys):
+    """stdout carries data; an error printed there would corrupt it."""
+    assert _record_batch_reader_from_dataset(_dataset(), columns=["missing"]) is None
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "Error reading dataset" in err
+
+
+def test_stac_errors_go_to_stderr_not_stdout(capsys, monkeypatch):
+    from botmap.core import _get_files_from_stac
+    from botmap.models import BBox
+
+    def unreachable(url):
+        raise OSError("offline")
+
+    monkeypatch.setattr("botmap.core.urlopen", unreachable)
+    assert _get_files_from_stac("places", "place", BBox(0, 0, 1, 1), "2026-08-19.0") is None
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "Error reading STAC index" in err

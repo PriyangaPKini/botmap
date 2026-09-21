@@ -192,12 +192,13 @@ def _get_files_from_stac(
             return s3_paths
         else:
             print(
-                f"No data found for release {release} in query bbox {bbox.as_tuple()}."
+                f"No data found for release {release} in query bbox {bbox.as_tuple()}.",
+                file=sys.stderr,
             )
             return []
 
     except Exception as e:
-        print(f"Error reading STAC index at {stac_url}: {e}")
+        print(f"Error reading STAC index at {stac_url}: {e}", file=sys.stderr)
         return None
 
 
@@ -244,7 +245,7 @@ def _record_batch_reader_from_dataset(
         return pa.RecordBatchReader.from_batches(schema, non_empty_batches)
 
     except Exception as e:
-        print(f"Error reading dataset: {e}")
+        print(f"Error reading dataset: {e}", file=sys.stderr)
         return None
 
 
