@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 import click
 import orjson
+import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -122,7 +123,7 @@ def _emit_zero_result_hint(type_, bbox, release, where_filters) -> None:
     field, value = target
     try:
         pairs = category_pairs(column_batches("place", CATEGORY_COLUMNS, bbox, release))
-    except OSError:
+    except (OSError, pa.ArrowException):
         return  # The hint is a courtesy; a failed scan must not fail the query.
     hint = zero_result_hint(field, value, pairs)
     if hint:

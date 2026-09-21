@@ -105,3 +105,14 @@ def test_failed_hint_scan_leaves_the_result_intact(zero_rows, monkeypatch):
     assert result.exit_code == 0
     assert result.stdout.strip() == "0"
 
+
+def test_arrow_error_in_hint_scan_leaves_the_result_intact(zero_rows, monkeypatch):
+    def broken(*args, **kwargs):
+        raise pa.ArrowInvalid("unreadable fragment")
+
+    monkeypatch.setattr("botmap.cli.column_batches", broken)
+    result = _run("count", "-t", "place", "--bbox", _BBOX,
+                  "--where", "basic_category=veterinarian")
+    assert result.exit_code == 0
+    assert result.stdout.strip() == "0"
+
