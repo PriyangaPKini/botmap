@@ -117,30 +117,29 @@ def _emit_zero_result_hint(type_, bbox, release, where_filters) -> None:
 
     Only call on the zero-row path: it scans the area's categories again.
     """
-    target = _category_filter_target(type_, where_filters)
-    if target is None:
+    targets = _category_filter_targets(type_, where_filters)
+    if not targets:
         return
-    field, value = target
     try:
         pairs = category_pairs(column_batches("place", CATEGORY_COLUMNS, bbox, release))
     except (OSError, pa.ArrowException):
         return  # The hint is a courtesy; a failed scan must not fail the query.
-    hint = zero_result_hint(field, value, pairs)
+    hints = (zero_result_hint(field, value, pairs) for field, value in targets)
+    hint = next((h for h in hints if h), None)
     if hint:
         click.secho(hint, fg="yellow", err=True)
 
 
-def _category_filter_target(type_, where_filters):
-    """Return the (field, value) of the first place category filter, or None."""
+def _category_filter_targets(type_, where_filters):
+    """Return every (field, value) a place category filter names, in order."""
     if type_ != "place":
-        return None
-    for f in where_filters or []:
-        if f.key not in _CATEGORY_FIELDS or f.op not in _CATEGORY_OPERATORS:
-            continue
-        values = f.value if f.op == "in" else [f.value]
-        if values:
-            return f.key, str(values[0])
-    return None
+        return []
+    return [
+        (f.key, str(value))
+        for f in where_filters or []
+        if f.key in _CATEGORY_FIELDS and f.op in _CATEGORY_OPERATORS
+        for value in (f.value if f.op == "in" else [f.value])
+    ]
 
 
 def _no_match_help(query: str) -> str:

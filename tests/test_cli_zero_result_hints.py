@@ -116,3 +116,9 @@ def test_arrow_error_in_hint_scan_leaves_the_result_intact(zero_rows, monkeypatc
     assert result.exit_code == 0
     assert result.stdout.strip() == "0"
 
+
+def test_every_in_value_is_checked(zero_rows):
+    """`veterinarian` exists, so the hint must come from the other value."""
+    result = _run("count", "-t", "place", "--bbox", _BBOX,
+                  "--where", "taxonomy.primary in [veterinarian,vets]")
+    assert "'vets'" in result.stderr
